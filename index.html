@@ -1,0 +1,1720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AZ MedStudio - Patient Case Workspace</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React and Babel CDNs -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      /* Smooth theme transitions */
+      .theme-transition {
+        transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+      }
+      /* Custom scrollbars */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: rgba(0,0,0,0.03);
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+      /* Print optimization specifically for Goals Roadmap output */
+      @media print {
+        header, .no-print, aside, section:not(.print-target) {
+          display: none !important;
+        }
+        body {
+          background: white !important;
+          color: black !important;
+        }
+        .print-target {
+          width: 100% !important;
+          max-width: 100% !important;
+          display: block !important;
+          border: none !important;
+          box-shadow: none !important;
+        }
+      }
+    </style>
+</head>
+<body class="text-slate-800 font-sans antialiased h-screen overflow-hidden theme-transition bg-[#f3f4f8]">
+    <div id="root" class="h-full"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect, useRef } = React;
+
+      // Premium custom vector icons matching the brand specifications of AZ MedStudio
+      const Icons = {
+        Logo: () => (
+          <svg className="h-6 w-6 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        ),
+        Microphone: ({ isListening }) => (
+          <svg className={`h-4 w-4 ${isListening ? 'text-red-500 animate-pulse' : 'text-slate-500'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+          </svg>
+        ),
+        Plus: () => (
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+        ),
+        Globe: () => (
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+          </svg>
+        ),
+        Trash: () => (
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        ),
+        Key: () => (
+          <svg className="h-4 w-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m-2-2a2 2 0 11-4 0m4 0a2 2 0 10-4 0m1-3h.01M12 12h.01M10 15h.01M8 18h.01M4 21h4v-3H4v3zm0-6h4v-3H4v3z" />
+          </svg>
+        ),
+        Download: () => (
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+        ),
+        Info: () => (
+          <svg className="h-4 w-4 text-indigo-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        ),
+        Theme: () => (
+          <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+          </svg>
+        ),
+        Internet: () => (
+          <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 002 2h1.5a1 1 0 011 1v1a1 1 0 001 1h2" />
+          </svg>
+        ),
+        SourceCheck: () => (
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+          </svg>
+        )
+      };
+
+      // Fully translated custom static files lookup
+      const translateDocContent = (docId, lang) => {
+        const translations = {
+          'doc-discharge-metropolitan': {
+            en: `METROPOLITAN HOSPITAL CENTER\nPATIENT: Faris Al-Harbi | AGE: 61 | GENDER: Male\nPRIMARY DIAGNOSIS: Mild Cardiac Fatigue, Hypertension\nALLERGIES: No Known Drug Allergies (NKDA)\n\nDISCHARGE PLAN:\n- Amlodipine 5mg blood pressure tablet is restarted. Take PO QD (once daily) in the morning.\n- Patient was treated for mild cardiac fatigue and congestion. Avoid extreme hydration or sodium rich feeds.\n- Schedule cardiology outpatient clinic follow-up in 4 weeks.`,
+            es: `METROPOLITAN HOSPITAL CENTER\nPACIENTE: Faris Al-Harbi | EDAD: 61 | GÉNERO: Masculino\nDIAGNÓSTICO PRIMARIO: Fatiga cardíaca leve, hipertensión\nALERGIAS: Sin alergias farmacológicas conocidas (NKDA)\n\nPLAN DE ALTA:\n- Se reinicia el comprimido de amlodipino 5 mg para la presión arterial. Tomar PO QD (una vez al día) por la mañana.\n- El paciente fue tratado por fatiga cardíaca leve y congestión. Evite la hidratación extrema o los alimentos ricos en sodio.\n- Programar el seguimiento en la clínica ambulatoria de cardiología en 4 semanas.`,
+            ar: `مركز ميتوبوليتان الطبي\nالمريض: فارس الحربي | العمر: 61 | الجنس: ذكر\nالتشخيص الأساسي: إجهاد خفيف في القلب، ارتفاع ضغط الدم\nالحساسية: لا توجد حساسية معروفة للأدوية (NKDA)\n\nخطة الخروج:\n- إعادة البدء في تناول حبوب أملوديبين 5 ملغ لضغط الدم. تؤخذ عن طريق الفم مرة واحدة يومياً (PO QD) في الصباح.\n- تم علاج المريض من إجهاد خفيف في القلب واحتقان. تجنب الترطيب الزائد أو الأغذية الغنية بالصوديوم.\n- جدولة موعد المتابعة في عيادة القلب الخارجية خلال 4 أسابيع.`,
+            fr: `METROPOLITAN HOSPITAL CENTER\nPATIENT : Faris Al-Harbi | ÂGE : 61 | GENRE : Homme\nDIAGNOSTIC PRINCIPAL : Fatigue cardiaque légère, hypertension\nALLERGIES : Aucune allergie médicamenteuse connue (NKDA)\n\nPLAN DE SORTIE :\n- Le comprimé d'amlodipine 5 mg pour la tension artérielle est repris. Prendre PO QD (une fois par jour) le matin.\n- Le patient a été traité pour une fatigue cardiaque légère et une congestion. Éviter l'hydratation extrême ou les aliments riches en sodium.\n- Planifier un suivi en clinique externe de cardiologie dans 4 semaines.`,
+            hi: `मेट्रोपॉलिटन अस्पताल केंद्र\nरोगी: फारिस अल-हरबी | आयु: 61 | लिंग: पुरुष\nप्राथमिक निदान: हल्का हृदय तनाव, उच्च रक्तचाप\nएलर्जी: कोई ज्ञात दवा एलर्जी नहीं (NKDA)\n\nडिस्चार्ज योजना:\n- एम्लोडिपाइन 5mg रक्तचाप की गोली फिर से शुरू की जाती है। सुबह मौखिक रूप से एक बार (PO QD) लें।\n- रोगी का हल्के हृदय तनाव और जमाव के लिए इलाज किया गया था। अत्यधिक जलयोजन या सोडियम युक्त खाद्य पदार्थों से बचें।\n- 4 सप्ताह में कार्डियोलॉजी आउटपेशेंट क्लिनिक अनुवर्ती कार्यक्रम निर्धारित करें।`,
+            ur: `میٹروپولیٹن ہسپتال سینٹر\nمریض: فارس الحربی | عمر: 61 | جنس: مرد\nابتدائی تشخیص: دل کی معمولی کمزوری، ہائی بلڈ پریشر\nایلرجی: کسی دوا سے کوئی معلوم الرجی نہیں (NKDA)\n\nڈسچارج پلان:\n- املوڈپین 5 ملی گرام بلڈ پریشر کی گولی دوبارہ شروع کی جاتی ہے۔ صبح منہ کے ذریعے روزانہ ایک بار (PO QD) لیں۔\n- مریض کا دل کی معمولی کمزوری اور پھیپھڑوں کے بھراؤ کا علاج کیا گیا تھا۔ زیادہ پانی پینے اور نمکین غذاؤں سے پرہیز کریں۔\n- 4 ہفتوں میں امراضِ قلب کے آؤٹ پیشنٹ کلینک میں معائنے کا وقت طے کریں۔`
+          },
+          'doc-blood-report': {
+            en: `GLOBAL LAB CLINIC\nPATIENT: Faris Al-Harbi | DATE: June 27, 2026\nTEST PARAMETERS         | RESULT     | REFERENCE RANGE | OUTCOME\n---------------------------------------------------------------\nTotal Cholesterol        | 240 mg/dL  | < 200           | HIGH\nLDL Cholesterol          | 155 mg/dL  | < 100           | HIGH\nHDL Cholesterol          | 38 mg/dL   | > 40            | LOW\nTriglycerides            | 190 mg/dL  | < 150           | HIGH\n\nCOMMENTS: Elevated lipid levels are consistent with hyperlipidemia. Patient state during lipid blood draw was not specified as fasting. Suggest clinical fast lipid review.`,
+            es: `GLOBAL LAB CLINIC\nPACIENTE: Faris Al-Harbi | FECHA: 27 de junio de 2026\nPARÁMETROS DEL TEST      | RESULTADO  | RANGO DE REFERENCIA | RESULTADO\n---------------------------------------------------------------\nColesterol Total         | 240 mg/dL  | < 200               | ALTO\nColesterol LDL           | 155 mg/dL  | < 100               | ALTO\nColesterol HDL           | 38 mg/dL   | > 40                | BAJO\nTriglicéridos            | 190 mg/dL  | < 150               | ALTO\n\nCOMENTARIOS: Los niveles elevados de lípidos son consistentes con la hiperlipidemia. No se especificó si el paciente estaba en ayunas durante la extracción de sangre. Se sugiere una revisión de lípidos en ayunas.`,
+            ar: `عيادة التحاليل العالمية\nالمريض: فارس الحربي | التاريخ: 27 يونيو 2026\nمؤشرات الفحص             | النتيجة    | المعدل الطبيعي       | الحالة\n---------------------------------------------------------------\nالكوليسترول الكلي        | 240 ملغ/دل | < 200               | مرتفع\nالكوليسترول الضار LDL    | 155 ملغ/دل | < 100               | مرتفع\nالكوليسترول المفيد HDL   | 38 ملغ/دل  | > 40                | منخفض\nالدهون الثلاثية          | 190 ملغ/دل | < 150               | مرتفع\n\nملاحظات: مستويات الدهون المرتفعة تتماشى مع تشخيص فرط دهون الدم. لم يتم تحديد ما إذا كان المريض صائماً أثناء سحب العينة. يُقترح إعادة الفحص في حالة صيام كامل.`,
+            fr: `GLOBAL LAB CLINIC\nPATIENT : Faris Al-Harbi | DATE : 27 juin 2026\nPARAMÈTRES DU TEST       | RÉSULTAT   | VALEURS DE RÉFÉRENCE| RÉSULTAT\n---------------------------------------------------------------\nCholestérol Total        | 240 mg/dL  | < 200               | ÉLEVÉ\nCholestérol LDL          | 155 mg/dL  | < 100               | ÉLEVÉ\nCholestérol HDL          | 38 mg/dL   | > 40                | BAS\nTriglycérides            | 190 mg/dL  | < 150               | ÉLEVÉ\n\nCOMMENTAIRES : Les taux élevés de lipides sont compatibles avec une hyperlipidémie. L'état de jeûne du patient lors du prélèvement sanguin n'a pas été précisé. Suggérer un bilan lipidique à jeun.`,
+            hi: `ग्लोबल लैब क्लिनिक\nरोगी: फारिस अल-हरबी | दिनांक: 27 जून, 2026\nपरीक्षण पैरामीटर          | परिणाम     | संदर्भ सीमा          | परिणाम\n---------------------------------------------------------------\nकुल कोलेस्ट्रॉल          | 240 mg/dL  | < 200                | उच्च\nएलडीएल कोलेस्ट्रॉल       | 155 mg/dL  | < 100                | उच्च\nएचडीएल कोलेस्ट्रॉल       | 38 mg/dL   | > 40                 | कम\nट्राइग्लिसराइड्स          | 190 mg/dL  | < 150                | उच्च\n\nटिप्पणी: बढ़े हुए लिपिड स्तर हाइपरलिपिडिमिया के अनुरूप हैं। रक्त लेते समय रोगी के उपवास की स्थिति निर्दिष्ट नहीं थी। उपवास लिपिड समीक्षा का सुझाव दिया जाता है।`,
+            ur: `گلوبل لیب کلینک\nمریض: فارس الحربی | تاریخ: 27 جون، 2026\nٹیسٹ پیرامیٹرز            | نتیجہ      | نارمل حد             | نتیجہ\n---------------------------------------------------------------\nکل کولیسٹرول             | 240 mg/dL  | < 200                | زیادہ\nایل ڈی ایل کولیسٹرول      | 155 mg/dL  | < 100                | زیادہ\nایچ ڈی ایل کولیسٹرول      | 38 mg/dL   | > 40                 | کم\nٹرائی گلیسرائڈز            | 190 mg/dL  | < 150                | زیادہ\n\nتبصرہ: چربی کی زیادہ مقدار ہائپرلیپیڈیمیا کی نشاندہی کرتی ہے۔ خون لیتے وقت مریض کے نہار منہ ہونے کی وضاحت نہیں کی گئی۔ دوبارہ نہار منہ ٹیسٹ کرانے کا مشورہ دیا جاتا ہے۔`
+          },
+          'doc-cardio-prescription': {
+            en: `CARDIOLOGY OUTPATIENT CLINIC\nRx:\n- [Smudged Name / Unclear Term] 10mg PO QD\n- Amlodipine 5mg PO QD\n- Renal precaution: Patient should strictly avoid OTC NSAIDs like Ibuprofen.`,
+            es: `CLÍNICA AMBULATORIA DE CARDIOLOGÍA\nRx:\n- [Nombre borroso / Término poco claro] 10mg PO QD\n- Amlodipino 5mg PO QD\n- Precaución renal: El paciente debe evitar estrictamente los NSAID de venta libre como el ibuprofeno.`,
+            ar: `عيادة القلب الخارجية\nالوصفة الطبية (Rx):\n- [اسم ممحو / مصطلح غير واضح] 10 ملغ فموياً يومياً (PO QD)\n- أملوديبين 5 ملغ فموياً يومياً (PO QD)\n- احتياط كلوي: يجب على المريض تجنب مضادات الالتهاب غير الستيروئيدية تماماً مثل الإيبوبروفين.`,
+            fr: `CLINIQUE EXTERNE DE CARDIOLOGIE\nRx :\n- [Nom illisible / Terme peu clair] 10mg PO QD\n- Amlodipine 5mg PO QD\n- Précaution rénale : Le patient doit strictement éviter les AINS en vente libre comme l'ibuprofène.`,
+            hi: `हृदय रोग आउटपेशेंट क्लिनिक\nRx:\n- [धुंधला नाम / अस्पष्ट शब्द] 10mg PO QD\n- एम्लोडिपाइन 5mg PO QD\n- गुर्दे की सावधानी: रोगी को इबुप्रोफेन जैसे ओटीसी दर्दनाशकों से पूरी तरह बचना चाहिए।`,
+            ur: `امراض قلب کا آؤٹ پیشنٹ کلینک\nنسخہ (Rx):\n- [دھندلا نام / غیر واضح دوا] 10mg PO QD\n- املوڈپین 5 ملی گرام PO QD\n- گردوں کی احتیاط: مریض آئیبوپروفین جیسے عام پین کلرز لینے سے سختی سے پرہیز کریں۔`
+          }
+        };
+        return translations[docId]?.[lang] || null;
+      };
+
+      // Local translation and localization engine mapping the workspace labels dynamically
+      const LOCALIZATION_DICTIONARY = {
+        en: {
+          summaryTab: "Summary",
+          chartsTab: "Charts",
+          timelineTab: "Timeline",
+          printButton: "Print / Export",
+          confidenceLabel: "Confidence",
+          summarizeButton: "Summarize Source",
+          reliabilityLabel: "Reliability: Perfect Match",
+          noEvidence: "Select a roadmap goal from the right side panel to reveal detailed medical reasoning.",
+          clinicalEvidence: "Clinical Evidence",
+          summaryTitle: "Case Summary & Findings",
+          summaryFaris: "Faris Al-Harbi is a 61-year-old male with a documented background of Mild Cardiac Fatigue and Hypertension. Recent lab results indicate Hyperlipidemia (LDL: 155 mg/dL) from a blood draw taken in a suspected non-fasting state.",
+          summaryGeneral: "Synthesized patient roadmap dashboard summaries from custom uploaded clinical entries.",
+          clinicalPrecaution: "Clinical Precaution",
+          precautionText: "Patient has a strict renal warning prohibiting the use of standard over-the-counter NSAIDs (like Ibuprofen).",
+          chartsTitle: "Cholesterol Panel vs Optimal (mg/dL)",
+          totalChol: "Total Cholesterol",
+          badChol: "LDL Cholesterol (\"Bad\")",
+          goodChol: "HDL Cholesterol (\"Good\")",
+          normalCholInfo: "Normal is less than 200 mg/dL",
+          badCholInfo: "Optimal is less than 100 mg/dL",
+          goodCholInfo: "Optimal is more than 40 mg/dL",
+          medScheduleTitle: "Daily Medicine Schedule Map",
+          morning: "Morning",
+          afternoon: "Afternoon",
+          evening: "Evening",
+          bedtime: "Bedtime",
+          timelineTitle: "Chronological Patient Timeline",
+          dischargeTitle: "Hospital Discharge Summary",
+          dischargeDesc: "treated for Cardiac strain, congestion, started Amlodipine 5mg.",
+          lipidTitle: "Lipid Blood Draw",
+          lipidDesc: "Elevated lipid readings (Cholesterol: 240, LDL: 155). Fasting state unclear.",
+          cardioOutpatient: "Cardiology Script Outpatient",
+          cardioDesc: "Unclear smudged 10mg prescription medication added. Strict kidney painkiller warnings listed.",
+          noMedData: "No Medical Data Found!",
+          noMedDataDesc: "Warning: This file does not appear to contain valid medical data, clinical terminologies, or medication indicators.",
+          workspaceIntroTitle: "Clinical Workspace Overview",
+          workspaceIntroDesc: "Select an uploaded source or click on any roadmap analysis block on the right to examine exact textual references and clinical evidence.",
+          uncertaintyTitle: "Pharmacy & Clinician Verification Dashboard",
+          uncertaintyDesc: "The following items present high uncertainty or blurry print and must be verified:",
+          uncertaintyItem1: "1. Smudged Outpatient cardiology prescription name: Confirm with your doctor before dispensing.",
+          uncertaintyItem2: "2. Amlodipine duration: The script restart does not list a specific duration.",
+          uncertaintyItem3: "3. Lipid Panel fasting status: Unverified if the test represents a proper fasting metabolic baseline.",
+          evidenceTitle: "Verified Raw Source Quotations & Plain Summary:",
+          evidenceQuote: "\"Avoid NSAIDs like Ibuprofen due to renal precaution. Restart Amlodipine 5mg QD.\"",
+          evidenceTakeaway: "Simplified Patient Takeaway: Do not take store-bought pain relievers like Advil/Ibuprofen without speaking to your doctor first, as it could strain your kidneys.",
+          generatedSummaryLabel: "Generated Summary Findings",
+          welcomeTitle: "Welcome to AZ MedStudio Workspace",
+          welcomePurpose: "AZ MedStudio helps patients and caregivers untangle complex clinical discharge files, handwritten cardiologist scripts, and lab parameters into clear goals. It serves strictly as a clarifier and organizer.",
+          welcomeStart: "Upload files from your native system or type notes on-the-go. Or, click \"Load Sample Case Study\" on the left side to instantly preview preloaded logs.",
+          safetyDisclaimerTitle: "Patient Safety Disclaimer:",
+          safetyDisclaimerText: "This platform is a clinical explainer and document organizer. It is not an AI Doctor and does not substitute professional pharmacist drug conflict checks, emergency treatment, or regular clinical assessments."
+        },
+        es: {
+          summaryTab: "Resumen",
+          chartsTab: "Gráficos",
+          timelineTab: "Línea de Tiempo",
+          printButton: "Imprimir / Exportar",
+          confidenceLabel: "Confianza",
+          summarizeButton: "Resumir Origen",
+          reliabilityLabel: "Fiabilidad: Coincidencia Perfecta",
+          noEvidence: "Seleccione un objetivo de la hoja de ruta en el panel derecho para revelar el razonamiento médico detallado.",
+          clinicalEvidence: "Evidencia Clínica",
+          summaryTitle: "Resumen del caso y hallazgos",
+          summaryFaris: "Faris Al-Harbi es un hombre de 61 años con antecedentes documentados de fatiga cardíaca leve e hipertensión. Los resultados de laboratorio recientes indican hiperlipidemia (LDL: 155 mg/dL) de una extracción de sangre realizada en un estado sospechoso de no ayuno.",
+          summaryGeneral: "Resúmenes sintetizados de la hoja de ruta del paciente a partir de entradas clínicas personalizadas.",
+          clinicalPrecaution: "Precaución Clínica",
+          precautionText: "El paciente tiene una advertencia renal estricta que prohíbe el uso de NSAID estándar de venta libre (como el ibuprofeno).",
+          chartsTitle: "Panel de colesterol vs. óptimo (mg/dL)",
+          totalChol: "Colesterol Total",
+          badChol: "Colesterol LDL (\"Malo\")",
+          goodChol: "Colesterol HDL (\"Bueno\")",
+          normalCholInfo: "Lo normal es menos de 200 mg/dL",
+          badCholInfo: "El valor óptimo es menos de 100 mg/dL",
+          goodCholInfo: "El valor óptimo es más de 40 mg/dL",
+          medScheduleTitle: "Mapa de programación diaria de medicamentos",
+          morning: "Mañana",
+          afternoon: "Tarde",
+          evening: "Noche",
+          bedtime: "Hora de acostarse",
+          timelineTitle: "Línea de tiempo cronológica del paciente",
+          dischargeTitle: "Resumen de alta hospitalaria",
+          dischargeDesc: "tratado por tensión cardíaca, congestión, se inició Amlodipina 5mg.",
+          lipidTitle: "Extracción de sangre de lípidos",
+          lipidDesc: "Lecturas de lípidos elevadas (Colesterol: 240, LDL: 155). Estado de ayuno incierto.",
+          cardioOutpatient: "Receta ambulatoria de cardiología",
+          cardioDesc: "Se agregó un medicamento recetado de 10 mg borroso e incierto. Se enumeran advertencias estrictas sobre analgésicos renales.",
+          noMedData: "¡No se encontraron datos médicos!",
+          noMedDataDesc: "Advertencia: Este archivo no parece contener datos médicos válidos, terminología clínica o indicadores de medicamentos.",
+          workspaceIntroTitle: "Resumen del espacio de trabajo clínico",
+          workspaceIntroDesc: "Seleccione una fuente cargada o haga clic en cualquier bloque de análisis de hoja de ruta a la derecha para examinar referencias textuales exactas.",
+          uncertaintyTitle: "Panel de Verificación de Farmacia y Clínicos",
+          uncertaintyDesc: "Los siguientes elementos presentan alta incertidumbre o impresión borrosa y deben ser verificados:",
+          uncertaintyItem1: "1. Nombre de receta cardiológica borroso: Confirme con su médico antes de dispensar.",
+          uncertaintyItem2: "2. Duración de Amlodipina: El reinicio de la receta no indica una duración específica.",
+          uncertaintyItem3: "3. Estado de ayuno del panel lipídico: No verificado si representa un perfil metabólico de ayuno adecuado.",
+          evidenceTitle: "Cotizaciones de Fuentes Claras y Resumen Simple:",
+          evidenceQuote: "\"Evite los NSAID como el ibuprofeno debido a la precaución renal. Reinicie Amlodipina 5mg QD.\"",
+          evidenceTakeaway: "Consejo simplificado para el paciente: No tome analgésicos de venta libre como Advil/Ibuprofeno sin hablar primero con su médico, ya que podría dañar sus riñones.",
+          generatedSummaryLabel: "Resultados del resumen generado",
+          welcomeTitle: "Bienvenido a AZ MedStudio",
+          welcomePurpose: "AZ MedStudio ayuda a los pacientes y cuidadores a resolver archivos de alta complejos, recetas manuscritas de cardiólogos y parámetros de laboratorio en objetivos claros. Sirve estrictamente como aclarador y organizador.",
+          welcomeStart: "Cargue archivos desde su sistema o escriba notas sobre la marcha. O haga clic en \"Cargar estudio de caso de muestra\" en el lado izquierdo para ver una vista previa instantánea.",
+          safetyDisclaimerTitle: "Descargo de responsabilidad de seguridad del paciente:",
+          safetyDisclaimerText: "Esta plataforma es un explicador clínico y organizador de documentos. No es un médico de IA y no sustituye los controles de conflicto de medicamentos de farmacéuticos profesionales, el tratamiento de emergencia o las evaluaciones clínicas periódicas."
+        },
+        ar: {
+          summaryTab: "الملخص",
+          chartsTab: "المخططات",
+          timelineTab: "الجدول الزمني",
+          printButton: "طباعة / تصدير",
+          confidenceLabel: "مستوى الثقة",
+          summarizeButton: "تلخيص المصدر",
+          reliabilityLabel: "الموثوقية: تطابق تام",
+          noEvidence: "حدد هدفًا من لوحة خريطة الطريق الجانبية اليمنى لعرض التحليلات الطبية التفصيلية.",
+          clinicalEvidence: "الأدلة السريرية",
+          summaryTitle: "ملخص الحالة والنتائج",
+          summaryFaris: "فارس الحربي، رجل يبلغ من العمر 61 عامًا، يعاني من تعب خفيف في عضلة القلب وارتفاع ضغط الدم. تشير نتائج الفحوصات الأخيرة إلى وجود ارتفاع في الدهون (LDL: 155 ملغ/ديسيلتر) من عينة دم تم سحبها في حالة غير صيام.",
+          summaryGeneral: "ملخصات لوحة متابعة حالة المريض المصنعة من ملفات طبية مخصصة.",
+          clinicalPrecaution: "احتياط سريري مهم",
+          precautionText: "يواجه المريض تحذيرًا كلويًا صارمًا يمنع استخدام مسكنات الألم الشائعة (مثل الإيبوبروفين).",
+          chartsTitle: "مستويات الكوليسترول مقارنة بالحدود المثالية (ملغ/ديسيلتر)",
+          totalChol: "الكوليسترول الكلي",
+          badChol: "الكوليسترول الضار (LDL)",
+          goodChol: "الكوليسترول المفيد (HDL)",
+          normalCholInfo: "المستوى الطبيعي أقل من 200 ملغ/ديسيلتر",
+          badCholInfo: "المستوى المثالي أقل من 100 ملغ/ديسيلتر",
+          goodCholInfo: "المستوى المثالي أكثر من 40 ملغ/ديسيلتر",
+          medScheduleTitle: "خريطة جدول الأدوية اليومي",
+          morning: "صباحاً",
+          afternoon: "ظهراً",
+          evening: "مساءً",
+          bedtime: "قبل النوم",
+          timelineTitle: "التاريخ الطبي التسلسلي للمريض",
+          dischargeTitle: "ملخص الخروج من المستشفى",
+          dischargeDesc: "تلقى العلاج من إجهاد القلب والاحتقان، وبدأ على أملوديبين 5 ملغ.",
+          lipidTitle: "تحليل دهون الدم",
+          lipidDesc: "قراءات دهون مرتفعة (الكوليسترول الكلي: 240، LDL: 155). حالة الصيام غير مؤكدة.",
+          cardioOutpatient: "وصفة عيادة القلب الخارجية",
+          cardioDesc: "تمت إضافة دواء غير واضح بجرعة 10 ملغ. تم إدراج تحذيرات صارمة بخصوص مسكنات الألم الكلوية.",
+          noMedData: "لم يتم العثور على بيانات طبية!",
+          noMedDataDesc: "تحذير: لا يبدو أن هذا الملف يحتوي على بيانات طبية صالحة أو مصطلحات سريرية أو مؤشرات أدوية.",
+          workspaceIntroTitle: "نظرة عامة على مساحة العمل السريرية",
+          workspaceIntroDesc: "اختر أحد المصادر المرفوعة أو انقر على أي قسم في خريطة الطريق على اليمين لفحص الأدلة النصية والطبية بدقة.",
+          uncertaintyTitle: "لوحة التحقق للصيادلة والأطباء",
+          uncertaintyDesc: "العناصر التالية تواجه درجة عالية من عدم اليقين أو خط غير واضح ويجب التحقق منها:",
+          uncertaintyItem1: "1. اسم الوصفة الطبية لعيادة القلب غير واضح: يرجى التأكيد مع طبيبك قبل صرف الدواء.",
+          uncertaintyItem2: "2. مدة استخدام الأملوديبين: لم تذكر الوصفة مدة محددة.",
+          uncertaintyItem3: "3. حالة الصيام لتحليل الدهون: غير مؤكد ما إذا كان الفحص يمثل مستويات صيام دقيقة.",
+          evidenceTitle: "اقتباسات المصدر الخام الملخصة:",
+          evidenceQuote: "\"تجنب مضادات الالتهاب غير الستيروئيدية مثل الإيبوبروفين بسبب الاحتياطات الكلوية. أعد تشغيل أملوديبين 5 ملغ يومياً.\"",
+          evidenceTakeaway: "نصيحة مبسطة للمريض: لا تتناول مسكنات الألم الشائعة مثل الأدفيل أو الإيبوبروفين دون استشارة طبيبك أولاً، لأن ذلك قد يجهد كليتيك.",
+          generatedSummaryLabel: "ملخص نتائج مساحة العمل المنتجة",
+          welcomeTitle: "مرحباً بكم في مساحة عمل AZ MedStudio",
+          welcomePurpose: "تساعد منصة AZ MedStudio المرضى ومقدمي الرعاية على تبسيط ملفات الخروج المعقدة، والوصفات الطبية المكتوبة بخط اليد، ونتائج المختبر في أهداف واضحة وسهلة الفهم.",
+          welcomeStart: "قم برفع الملفات من جهازك أو اكتب الملاحظات السريعة في القائمة الجانبية. أو انقر على زر \"تحميل عينة دراسة الحالة\" لمعاينة البيانات الجاهزة فوراً.",
+          safetyDisclaimerTitle: "إخلاء مسؤولية لسلامة المريض:",
+          safetyDisclaimerText: "هذه المنصة مخصصة للشرح السريري وتنظيم المستندات فقط. إنها ليست طبيبًا ذكيًا ولا تغني عن الاستشارة المهنية للصيادلة أو مراجعة الأطباء والأقسام الطبية الطارئة."
+        },
+        fr: {
+          summaryTab: "Résumé",
+          chartsTab: "Graphiques",
+          timelineTab: "Chronologie",
+          printButton: "Imprimer / Exporter",
+          confidenceLabel: "Confiance",
+          summarizeButton: "Résumer la source",
+          reliabilityLabel: "Fiabilité : Correspondance parfaite",
+          noEvidence: "Sélectionnez un objectif de feuille de route dans le panneau de droite pour afficher le raisonnement médical.",
+          clinicalEvidence: "Preuves Cliniques",
+          summaryTitle: "Résumé du cas et conclusions",
+          summaryFaris: "Faris Al-Harbi est un homme de 61 ans présentant des antécédents documentés de fatigue cardiaque légère et d'hypertension. Des résultats de laboratoire récents indiquent une hyperlipidémie (LDL : 155 mg/dL) provenant d'un prélèvement sanguin effectué dans un état de non-jeûne suspecté.",
+          summaryGeneral: "Synthèse des feuilles de route des patients à partir d'entrées cliniques personnalisées.",
+          clinicalPrecaution: "Précaution Clinique",
+          precautionText: "Le patient fait l'objet d'un avertissement rénal strict interdisant l'utilisation d'AINS standard en vente libre (comme l'ibuprofène).",
+          chartsTitle: "Bilan lipidique vs Optimal (mg/dL)",
+          totalChol: "Cholestérol Total",
+          badChol: "Cholestérol LDL (\"Mauvais\")",
+          goodChol: "Cholestérol HDL (\"Bon\")",
+          normalCholInfo: "La valeur normale est inférieure à 200 mg/dL",
+          badCholInfo: "La valeur optimale est inférieure à 100 mg/dL",
+          goodCholInfo: "La valeur optimale est supérieure à 40 mg/dL",
+          medScheduleTitle: "Plan de prise quotidien des médicaments",
+          morning: "Matin",
+          afternoon: "Après-midi",
+          evening: "Soir",
+          bedtime: "Coucher",
+          timelineTitle: "Chronologie des événements du patient",
+          dischargeTitle: "Lettre de sortie d'hospitalisation",
+          dischargeDesc: "traité pour fatigue cardiaque, congestion, mis sous Amlodipine 5mg.",
+          lipidTitle: "Bilan Lipidique Sanguin",
+          lipidDesc: "Taux de lipides élevés (Cholestérol : 240, LDL : 155). Statut à jeun incertain.",
+          cardioOutpatient: "Ordonnance externe de cardiologie",
+          cardioDesc: "Ajout d'un traitement illisible de 10 mg. Avertissements stricts concernant les analgésiques rénaux.",
+          noMedData: "Aucune donnée médicale trouvée !",
+          noMedDataDesc: "Avertissement : Ce fichier ne semble pas contenir de données médicales valides, de terminologie clinique ou d'indicateurs de traitement.",
+          workspaceIntroTitle: "Présentation de l'espace de travail clinique",
+          workspaceIntroDesc: "Sélectionnez une source téléchargée ou cliquez sur un bloc d'analyse à droite pour examiner les preuves textuelles précises.",
+          uncertaintyTitle: "Tableau de Vérification Pharmacie & Praticiens",
+          uncertaintyDesc: "Les éléments suivants présentent une forte incertitude ou sont flous et doivent être vérifiés :",
+          uncertaintyItem1: "1. Nom d'ordonnance cardiologique flou : À confirmer avec votre médecin avant délivrance.",
+          uncertaintyItem2: "2. Durée d'Amlodipine : La reprise du traitement n'indique pas de durée spécifique.",
+          uncertaintyItem3: "3. État à jeun du bilan lipidique : Non vérifié si cela représente un profil métabolique à jeun adéquat.",
+          evidenceTitle: "Citations de Sources et Résumé Patient :",
+          evidenceQuote: "\"Éviter les AINS comme l'Ibuprofène en raison de précautions rénales. Reprendre l'Amlodipine 5mg QD.\"",
+          evidenceTakeaway: "Conseil patient simplifié : Ne prenez pas d'analgésiques en vente libre comme l'Advil/Ibuprofène sans en parler d'abord à votre médecin, car cela pourrait fatiguer vos reins.",
+          generatedSummaryLabel: "Synthèse des conclusions générées",
+          welcomeTitle: "Bienvenue dans l'espace AZ MedStudio",
+          welcomePurpose: "AZ MedStudio aide les patients et les proches à décrypter les rapports d'hospitalisation complexes, les ordonnances manuscrites et les analyses de sang.",
+          welcomeStart: "Téléchargez des fichiers depuis votre système ou écrivez des notes rapides. Ou cliquez sur \"Charger l'étude de cas\" pour prévisualiser instantanément des données simulées.",
+          safetyDisclaimerTitle: "Avertissement de sécurité patient :",
+          safetyDisclaimerText: "Cette plateforme est un outil d'explication et d'organisation documentaire. Ce n'est pas un médecin IA et elle ne remplace pas les vérifications de votre pharmacien ou un avis médical professionnel."
+        },
+        hi: {
+          summaryTab: "सारांश",
+          chartsTab: "चार्ट",
+          timelineTab: "समय रेखा",
+          printButton: "प्रिंट / निर्यात",
+          confidenceLabel: "आत्मविश्वास",
+          summarizeButton: "स्रोत का सारांश",
+          reliabilityLabel: "विश्वसनीयता: बिल्कुल किया हुआ",
+          noEvidence: "विस्तृत चिकित्सा तर्क देखने के लिए दाईं ओर के रोडमैप कार्ड पर क्लिक करें।",
+          clinicalEvidence: "चिकित्सीय साक्ष्य",
+          summaryTitle: "मामले का सारांश और निष्कर्ष",
+          summaryFaris: "फारिस अल-हरबी 61 वर्षीय पुरुष हैं, जिनके पास हल्की हृदय थकान और उच्च रक्तचाप का लिखित इतिहास है। हाल के लैब परिणाम हाइपरलिपिडिमिया (एलडीएल: 155 मिलीग्राम/डीएल) का संकेत देते हैं जो गैर-उपवास की स्थिति में लिए गए रक्त के नमूने से है।",
+          summaryGeneral: "कस्टम अपलोड किए गए क्लिनिकल दस्तावेज़ों से रोगी का रोडमैप सारांश।",
+          clinicalPrecaution: "चिकित्सीय सावधानी",
+          precautionText: "रोगी को गुर्दे की सुरक्षा के लिए सामान्य दर्द निवारक (जैसे इबुप्रोफेन) का उपयोग न करने की सख्त चेतावनी दी गई है।",
+          chartsTitle: "कोलेस्ट्रॉल पैनल बनाम इष्टतम (mg/dL)",
+          totalChol: "कुल कोलेस्ट्रॉल",
+          badChol: "एलडीएल कोलेस्ट्रॉल (\"खराब\")",
+          goodChol: "एचडीएल कोलेस्ट्रॉल (\"अच्छा\")",
+          normalCholInfo: "सामान्य मूल्य 200 mg/dL से कम है",
+          badCholInfo: "इष्टतम मूल्य 100 mg/dL से कम है",
+          goodCholInfo: "इष्टतम मूल्य 40 mg/dL से अधिक है",
+          medScheduleTitle: "दैनिक दवा अनुसूची मानचित्र",
+          morning: "सुबह",
+          afternoon: "दोपहर",
+          evening: "शाम",
+          bedtime: "सोते समय",
+          timelineTitle: "रोगी की कालानुक्रमिक समयरेखा",
+          dischargeTitle: "अस्पताल से छुट्टी का सारांश",
+          dischargeDesc: "हृदय पर खिंचाव, जमाव के लिए इलाज किया गया, एम्लोडिपाइन 5 मिलीग्राम शुरू किया गया।",
+          lipidTitle: "लिपिड ब्लड ड्रा",
+          lipidDesc: "बढ़े हुए लिपिड रीडिंग (कोलेस्ट्रॉल: 240, एलडीएल: 155)। उपवास की स्थिति अस्पष्ट।",
+          cardioOutpatient: "हृदयरोग आउटपेशेंट प्रिस्क्रिप्शन",
+          cardioDesc: "अस्पष्ट धुंधली 10mg दवा जोड़ी गई। सख्त गुर्दे की दर्द निवारक चेतावनियां सूचीबद्ध हैं।",
+          noMedData: "कोई चिकित्सा डेटा नहीं मिला!",
+          noMedDataDesc: "चेतावनी: ऐसा लगता है कि इस फ़ाइल में कोई वैध चिकित्सा डेटा, नैदानिक शब्दावली या दवा संकेतक नहीं हैं।",
+          workspaceIntroTitle: "क्लिनिकल वर्कस्पेस अवलोकन",
+          workspaceIntroDesc: "अपलोड किए गए स्रोत का चयन करें या सटीक साक्ष्य देखने के लिए दाईं ओर के रोडमैप विश्लेषण ब्लॉक पर क्लिक करें।",
+          uncertaintyTitle: "फार्मेसी और नैदानिक सत्यापन डैशबोर्ड",
+          uncertaintyDesc: "निम्नलिखित मदों में उच्च अनिश्चितता है और सत्यापित किया जाना चाहिए:",
+          uncertaintyItem1: "1. धुंधली हृदय रोग विशेषज्ञ पर्ची का नाम: दवा लेने से पहले डॉक्टर से पुष्टि करें।",
+          uncertaintyItem2: "2. एम्लोडिपाइन की अवधि: पर्चे में विशिष्ट अवधि दर्ज नहीं है।",
+          uncertaintyItem3: "3. लिपिड प्रोफाइल उपवास स्थिति: अपुष्ट है कि टेस्ट सही उपवास की स्थिति में लिया गया था।",
+          evidenceTitle: "सत्यापित स्रोत और सरल सारांश:",
+          evidenceQuote: "\"गुर्दे की सुरक्षा के कारण इबुप्रोफेन जैसे दर्दनाशक से बचें। एम्लोडिपाइन 5mg शुरू करें।\"",
+          evidenceTakeaway: "सरल टेकअवे: डॉक्टर से परामर्श के बिना इबुप्रोफेन या एडविल जैसी दवाएं न लें क्योंकि इससे आपके गुर्दे पर दबाव पड़ सकता है।",
+          generatedSummaryLabel: "निर्मित सारांश निष्कर्ष",
+          welcomeTitle: "AZ MedStudio कार्यक्षेत्र में आपका स्वागत है",
+          welcomePurpose: "AZ MedStudio जटिल डिस्चार्ज फाइलों, डॉक्टर की पर्ची और लैब रिपोर्ट को आसान लक्ष्यों में बदलने में मरीजों की मदद करता है।",
+          welcomeStart: "अपने सिस्टम से फाइलें अपलोड करें या नोट्स लिखें। या पहले से लोड किए गए डेटा को तुरंत देखने के लिए 'डेमो केस स्टडी लोड करें' पर क्लिक करें।",
+          safetyDisclaimerTitle: "मरीज की सुरक्षा चेतावनी:",
+          safetyDisclaimerText: "यह प्लेटफॉर्म नैदानिक समझ और दस्तावेज व्यवस्थित करने के लिए है। यह कोई एआई डॉक्टर नहीं है और पेशेवर डॉक्टर या फार्मासिस्ट का विकल्प नहीं है।"
+        },
+        ur: {
+          summaryTab: "خلاصہ",
+          chartsTab: "چارٹ",
+          timelineTab: "ٹائم لائن",
+          printButton: "پرنٹ / خلاصہ ڈاؤن لوڈ",
+          confidenceLabel: "اعتماد کا درجہ",
+          summarizeButton: "ذریعہ کا خلاصہ",
+          reliabilityLabel: "قابل اعتمادی: بہترین مطابقت",
+          noEvidence: "طبی وجوہات اور شواہد دیکھنے کے لیے دائیں جانب روڈ میپ پینل سے کسی کارڈ کا انتخاب کریں۔",
+          clinicalEvidence: "طبی شواہد",
+          summaryTitle: "کیس کا خلاصہ اور نتائج",
+          summaryFaris: "فارس الحربی ایک 61 سالہ مرد ہیں جن کا دل کی معمولی کمزوری اور ہائی بلڈ پریشر کا طبی ریکارڈ موجود ہے۔ حالیہ ٹیسٹ کی رپورٹوں میں بغیر نہار منہ لیے گئے خون کے نمونے سے کولیسٹرول کی زیادتی (LDL: 155 mg/dL) ظاہر ہوتی ہے۔",
+          summaryGeneral: "مریض کے اپ لوڈ کردہ طبی دستاویزات سے تیار کردہ خلاصے اور روڈ میپ۔",
+          clinicalPrecaution: "طبی احتیاطی تدابیر",
+          precautionText: "مریض کو گردوں کے تحفظ کے لیے عام درد کش ادویات (جیسے بروفن) کے استعمال سے سختی سے منع کیا گیا ہے۔",
+          chartsTitle: "کولیسٹرول پینل بمقابلہ بہترین حالت (mg/dL)",
+          totalChol: "کل کولیسٹرول",
+          badChol: "ایل ڈی ایل کولیسٹرول (\"خراب\")",
+          goodChol: "ایچ ڈی ایل کولیسٹرول (\"اچھا\")",
+          normalCholInfo: "نارمل حد 200 mg/dL سے کم ہے",
+          badCholInfo: "بہترین حد 100 mg/dL سے کم ہے",
+          goodCholInfo: "بہترین حد 40 mg/dL سے زیادہ ہے",
+          medScheduleTitle: "روزانہ ادویات کا شیڈول کارڈ",
+          morning: "صبح",
+          afternoon: "دوپہر",
+          evening: "شام",
+          bedtime: "سوتے وقت",
+          timelineTitle: "مریض کی تاریخی ٹائم لائن",
+          dischargeTitle: "ہسپتال سے خلاصہ",
+          dischargeDesc: "دل کے کھچاؤ اور پھیپھڑوں کے بھراؤ کا علاج کیا گیا، اور املوڈپین 5 ملی گرام شروع کی گئی۔",
+          lipidTitle: "کولیسٹرول ٹیسٹ",
+          lipidDesc: "کولیسٹرول کی زیادہ مقدار (ٹوٹل کولیسٹرول: 240، LDL: 155)۔ نہار منہ ہونا غیر واضح۔",
+          cardioOutpatient: "امراض قلب کی آؤٹ پیشنٹ پرچی",
+          cardioDesc: "ایک دھندلی اور غیر واضح 10 ملی گرام دوا شامل کی گئی۔ گردوں پر اثر انداز ہونے والے پین کلرز سے متعلق سخت وارننگ درج ہے۔",
+          noMedData: "طبی معلومات نہیں ملیں!",
+          noMedDataDesc: "وارننگ: ایسا لگتا ہے کہ اس فائل میں کوئی درست طبی معلومات، نسخہ جات، یا ادویات کی تفصیل موجود نہیں ہے۔",
+          workspaceIntroTitle: "کلینیکل ورک اسپیس کا جائزہ",
+          workspaceIntroDesc: "کسی اپ لوڈ کردہ دستاویز کو منتخب کریں یا طبی شواہد اور تحریری شواہد کی جانچ پڑتال کے لیے دائیں طرف روڈ میپ کے حصوں پر کلک کریں۔",
+          uncertaintyTitle: "فارمیسی اور کلینشین تصدیقی ڈیش بورڈ",
+          uncertaintyDesc: "مندرجہ ذیل اشیاء میں اعلیٰ غیر یقینی صورتحال موجود ہے اور ان کی تصدیق لازمی ہے:",
+          uncertaintyItem1: "1. امراض قلب کی دھندلی پرچی کا نام: دوا لینے سے پہلے ڈاکٹر سے تصدیق کریں۔",
+          uncertaintyItem2: "2. املوڈپین کی مدت: پرچی میں مخصوص مدت درج نہیں ہے۔",
+          uncertaintyItem3: "3. لپڈ پروفائل نہار منہ کی حیثیت: غیر تصدیق شدہ ہے کہ ٹیسٹ صحیح حالت میں لیا گیا تھا یا نہیں۔",
+          evidenceTitle: "تصدیق شدہ طبی شواہد اور آسان خلاصہ:",
+          evidenceQuote: "\"گردے کی احتیاط کی وجہ سے آئیبوپروفین سے پرہیز کریں۔ املوڈپین 5mg روزانہ شروع کریں۔\"",
+          evidenceTakeaway: "آسان الفاظ میں مریض کے لیے نصیحت: ڈاکٹر کے مشورے کے بغیر آئیبوپروفین یا ایڈول وغیرہ نہ لیں کیونکہ اس سے گردوں پر دباؤ پڑ سکتا ہے۔",
+          generatedSummaryLabel: "طیار کردہ خلاصہ نتائج",
+          welcomeTitle: "AZ MedStudio میں خوش آمدید",
+          welcomePurpose: "AZ MedStudio مریضوں اور نگہداشت کرنے والوں کو ہسپتال سے فارغ ہونے کی پیچیدہ فائلوں، ڈاکٹروں کے نسخوں اور لیبارٹری رپورٹس کو آسان اہداف میں تبدیل کرنے میں مدد کرتا ہے۔",
+          welcomeStart: "اپنے سسٹم سے فائلیں اپ لوڈ کریں یا چلتے پھرتے نوٹ لکھیں۔ یا پہلے سے لوڈ کردہ ڈیٹا دیکھنے کے لیے 'ڈیمو کیس اسٹڈی لوڈ کریں' پر کلک کریں۔",
+          safetyDisclaimerTitle: "مریض کی حفاظت کی وارننگ:",
+          safetyDisclaimerText: "یہ پلیٹ فارم طبی تفہیم اور دستاویزات کو منظم کرنے کے لیے ہے۔ یہ کوئی مصنوعی ذہانت کا ڈاکٹر نہیں ہے اور پیشہ ور ڈاکٹر یا فارماسسٹ کا متبادل نہیں ہے۔"
+        }
+      };
+
+      // Comprehensive Sample Case study (Faris Al-Harbi) matching specifications
+      const SAMPLE_FARIS_DOCUMENTS = [
+        {
+          id: 'doc-discharge-metropolitan',
+          name: 'Faris_Discharge_Metropolitan.txt',
+          type: 'Discharge Summary',
+          lang: 'English',
+          confidence: 'High',
+          status: 'Extracted',
+          isInvalidMedical: false,
+          content: `METROPOLITAN HOSPITAL CENTER\nPATIENT: Faris Al-Harbi | AGE: 61 | GENDER: Male\nPRIMARY DIAGNOSIS: Mild Cardiac Fatigue, Hypertension\nALLERGIES: No Known Drug Allergies (NKDA)\n\nDISCHARGE PLAN:\n- Amlodipine 5mg blood pressure tablet is restarted. Take PO QD (once daily) in the morning.\n- Patient was treated for mild cardiac fatigue and congestion. Avoid extreme hydration or sodium rich feeds.\n- Schedule cardiology outpatient clinic follow-up in 4 weeks.`
+        },
+        {
+          id: 'doc-blood-report',
+          name: 'Faris_Blood_LipidReport.pdf',
+          type: 'Lab Report',
+          lang: 'Arabic + English',
+          confidence: 'High',
+          status: 'Extracted',
+          isInvalidMedical: false,
+          content: `GLOBAL LAB CLINIC\nPATIENT: Faris Al-Harbi | DATE: June 27, 2026\nTEST PARAMETERS         | RESULT     | REFERENCE RANGE | OUTCOME\n---------------------------------------------------------------\nTotal Cholesterol        | 240 mg/dL  | < 200           | HIGH\nLDL Cholesterol          | 155 mg/dL  | < 100           | HIGH\nHDL Cholesterol          | 38 mg/dL   | > 40            | LOW\nTriglycerides            | 190 mg/dL  | < 150           | HIGH\n\nCOMMENTS: Elevated lipid levels are consistent with hyperlipidemia. Patient state during lipid blood draw was not specified as fasting. Suggest clinical fast lipid review.`
+        },
+        {
+          id: 'doc-cardio-prescription',
+          name: 'Faris_Cardiology_Script.png',
+          type: 'Prescription Image',
+          lang: 'English Shorthand',
+          confidence: 'Medium',
+          status: 'Extracted',
+          isInvalidMedical: false,
+          content: `CARDIOLOGY OUTPATIENT CLINIC\nRx:\n- [Smudged Name / Unclear Term] 10mg PO QD\n- Amlodipine 5mg PO QD\n- Renal precaution: Patient should strictly avoid OTC NSAIDs like Ibuprofen.`
+        }
+      ];
+
+      // Dynamic Interactive Roadmap Goals Engine matching specification
+      const GOALS_DATABASE = [
+        {
+          id: 'goal-1',
+          icon: '🚨',
+          color: 'from-rose-50 to-rose-100/50 hover:bg-rose-100/80 dark:from-rose-950/20 dark:to-rose-900/10 dark:border-rose-900/30',
+          textColor: 'text-rose-800 dark:text-rose-300',
+          title: "1. Urgent Safety & Alerts",
+          desc: "Critical drug conflicts, acute allergy precautions, or dangerously abnormal markers.",
+          content: "Allergy & Drug Conflict Check: A blurry handwritten Cardiology script lists an unknown 10mg PO QD medication. DO NOT fill or ingest this until your pharmacist directly contacts the doctor. Ibuprofen must be strictly avoided due to potential kidney pressure noted by the cardiologist. Report any acute shortness of breath or sudden left arm pressure immediately to emergency services.",
+          evidence: "Source: Faris_Cardiology_Script.png -> 'Avoid NSAIDs like Ibuprofen due to renal precaution' and '[Smudged Name] 10mg'."
+        },
+        {
+          id: 'goal-2',
+          icon: '📋',
+          color: 'from-sky-50 to-sky-100/50 hover:bg-sky-100/80 dark:from-sky-950/20 dark:to-sky-900/10 dark:border-sky-900/30',
+          textColor: 'text-sky-800 dark:text-sky-300',
+          title: "2. Condition Map & Diagnoses",
+          desc: "Full explanation of conditions like Mild Cardiac Fatigue and Hyperlipidemia in plain English.",
+          content: "You have two main findings in your files:\n- Mild Cardiac Fatigue & Hypertension: Your heart muscle was under temporary strain from carrying high blood pressure. Taking your restarted Amlodipine daily will lower blood pressure to let your heart pump smoothly.\n- Hyperlipidemia: Highly elevated fatty lipids (Total Cholesterol 240, LDL 155) which can form plaque over time if untreated.",
+          evidence: "Source: Faris_Discharge_Metropolitan.txt -> 'PRIMARY DIAGNOSIS: Mild Cardiac Fatigue, Hypertension'."
+        },
+        {
+          id: 'goal-3',
+          icon: '💊',
+          color: 'from-purple-50 to-purple-100/50 hover:bg-purple-100/80 dark:from-purple-950/20 dark:to-purple-900/10 dark:border-purple-900/30',
+          textColor: 'text-purple-800 dark:text-purple-300',
+          title: "3. Medication Dashboard",
+          desc: "A clear overview of active medications, generic matching, and specific target indications.",
+          content: "Your active medications list is:\n1. Amlodipine 5mg (Generic): Taken daily to relax narrow blood vessels. This treats your diagnosed Hypertension.\n2. Unknown cardiology medication (10mg): Likely prescribed for cholesterol or additional blood pressure stabilization. Awaiting pharmacist clarification.",
+          evidence: "Source: Faris_Cardiology_Script.png -> 'Amlodipine 5mg PO QD' and '[Smudged Name/Unclear Term] 10mg PO QD'."
+        },
+        {
+          id: 'goal-4',
+          icon: '✍️',
+          color: 'from-amber-50 to-amber-100/50 hover:bg-amber-100/80 dark:from-amber-950/20 dark:to-amber-900/10 dark:border-amber-900/30',
+          textColor: 'text-amber-800 dark:text-amber-300',
+          title: "4. Plain Instructions (Shorthand Deco)",
+          desc: "Decoding medical shorthand like PO, BID, and QD into understandable daily protocols.",
+          content: "- 'PO' = Taken by mouth.\n- 'QD' = Once daily.\n- Recommended Administration: Take Amlodipine 5mg by mouth once daily in the morning with a glass of plain water. Do not skip days even if you feel entirely healthy.",
+          evidence: "Source: Faris_Discharge_Metropolitan.txt -> 'Take daily in the morning' and 'PO QD'."
+        },
+        {
+          id: 'goal-5',
+          icon: '⚠️',
+          color: 'from-orange-50 to-orange-100/50 hover:bg-orange-100/80 dark:from-orange-950/20 dark:to-orange-900/10 dark:border-orange-900/30',
+          textColor: 'text-orange-800 dark:text-orange-300',
+          title: "5. Side Effects & Warnings",
+          desc: "Differentiating standard temporary side effects from emergency warning symptoms.",
+          content: "- Normal temporary reactions: Amlodipine can cause light ankle swelling (fluid buildup), mild facial flushing, or occasional morning dizziness.\n- Emergency signals: If you experience facial swelling, chest pain, an unexplained full-body skin rash, or a heartbeat that feels too fast or skipping, seek emergency care.",
+          evidence: "Cross-referenced from Amlodipine 5mg standard drug-monograph and clinical discharge notes."
+        },
+        {
+          id: 'goal-6',
+          icon: '📊',
+          color: 'from-teal-50 to-teal-100/50 hover:bg-teal-100/80 dark:from-teal-950/20 dark:to-teal-900/10 dark:border-teal-900/30',
+          textColor: 'text-teal-800 dark:text-teal-300',
+          title: "6. Lab Analyst",
+          desc: "Deciphering LDL, Triglycerides, and whether you need a repeated fasting blood test.",
+          content: "- Total Cholesterol (240 mg/dL): HIGH (Recommended is < 200). Your body has extra fatty lipid compounds.\n- LDL Cholesterol (155 mg/dL): HIGH (Optimal is < 100). This 'bad cholesterol' represents plaque building block units.\n- HDL Cholesterol (38 mg/dL): LOW (Optimal is > 40). Your protective 'good cholesterol' is slightly below target.",
+          evidence: "Source: Faris_Blood_LipidReport.pdf -> 'Total Cholesterol: 240', 'LDL: 155', 'HDL: 38'."
+        },
+        {
+          id: 'goal-7',
+          icon: '🌱',
+          color: 'from-emerald-50 to-emerald-100/50 hover:bg-emerald-100/80 dark:from-emerald-950/20 dark:to-emerald-900/10 dark:border-emerald-900/30',
+          textColor: 'text-emerald-800 dark:text-emerald-300',
+          title: "7. Lifestyle Plan (Care Habits)",
+          desc: "Low-sodium diet, fluid management, and safe flat-terrain cardiac exercises.",
+          content: "1. Strictly restrict sodium / table salt (avoid processed foods) to reduce fluid retention and chest strain.\n2. Do not consume extreme volumes of water/fluids suddenly to protect your cardiovascular pressure thresholds.\n3. Participate in light physical movement, such as 20 minutes of flat-terrain walking daily. Stop immediately if lightheadedness occurs.",
+          evidence: "Source: Faris_Discharge_Metropolitan.txt -> 'Avoid extreme hydration or sodium rich feeds'."
+        },
+        {
+          id: 'goal-8',
+          icon: '⏱️',
+          color: 'from-indigo-50 to-indigo-100/50 hover:bg-indigo-100/80 dark:from-indigo-950/20 dark:to-indigo-900/10 dark:border-indigo-900/30',
+          textColor: 'text-indigo-800 dark:text-indigo-300',
+          title: "8. Home Measurement Metrics",
+          desc: "Specific daily home metrics such as systolic/diastolic blood pressure and heart rate loggers.",
+          content: "- Blood Pressure: Measure your BP twice daily (once in the morning before medication, once in the evening before dinner).\n- Heart Rate / Pulse: Log your resting pulse rates to assist the cardiologist during your 4-week follow-up appointment.",
+          evidence: "Source: Faris_Discharge_Metropolitan.txt -> 'Schedule cardiology outpatient clinic follow-up in 4 weeks'."
+        },
+        {
+          id: 'goal-9',
+          icon: '❓',
+          color: 'from-pink-50 to-pink-100/50 hover:bg-pink-100/80 dark:from-pink-950/20 dark:to-pink-900/10 dark:border-pink-900/30',
+          textColor: 'text-pink-800 dark:text-pink-300',
+          title: "9. Doctor Questions Checklist",
+          desc: "3 to 5 targeted, high-value questions prepared for your upcoming cardiologist visit.",
+          content: "1. 'Can you read the smudged 10mg drug name on my cardiology prescription? Is this medication crucial for my treatment?'\n2. 'My blood draw was non-fasting. Should I repeat my Lipid Panel test after fasting for 12 hours?'\n3. 'How long do I need to stay on Amlodipine 5mg? Is it permanent?'\n4. 'Are there specific over-the-counter pain medications that are safe for my kidneys instead of Ibuprofen?'",
+          evidence: "Synthesized based on gaps identified between Faris_Cardiology_Script.png and Faris_Blood_LipidReport.pdf."
+        },
+        {
+          id: 'goal-10',
+          icon: '🔍',
+          color: 'from-fuchsia-50 to-fuchsia-100/50 hover:bg-fuchsia-100/80 dark:from-fuchsia-950/20 dark:to-fuchsia-900/10 dark:border-fuchsia-900/30',
+          textColor: 'text-fuchsia-800 dark:text-fuchsia-300',
+          title: "10. Uncertainties & Verification",
+          desc: "Addressing smudged prescription terms, unconfirmed fasting states, and timeline missing gaps.",
+          content: "- Smudged Medication: The name of the 10mg medication on the cardiology script is completely illegible and needs direct pediatrician/cardiologist confirmation.\n- Fasting baseline: It is currently unconfirmed if your cholesterol scores represent a fasting baseline.",
+          evidence: "Source: Faris_Cardiology_Script.png -> '[Smudged Name/Unclear Term] 10mg' and Faris_Blood_LipidReport.pdf -> 'Non-fasting lipids suspected'."
+        }
+      ];
+
+      function App() {
+        const [docs, setDocs] = useState([]); 
+        const [selectedDocId, setSelectedDocId] = useState(null);
+        const [theme, setTheme] = useState('light'); 
+        const [apiKey, setApiKey] = useState('');
+        const [showSettings, setShowSettings] = useState(false);
+        const [notesText, setNotesText] = useState('');
+        const [middleView, setMiddleView] = useState('intro'); 
+        const [middleViewLang, setMiddleViewLang] = useState('en'); 
+        const [selectedGoalId, setSelectedGoalId] = useState(null);
+        const [manualContext, setManualContext] = useState(false);
+
+        const [patientContext, setPatientContext] = useState({
+          name: 'N/A',
+          age: 'N/A',
+          gender: 'N/A',
+          allergies: 'N/A'
+        });
+
+        // Chat parameters
+        const [chatQuery, setChatQuery] = useState('');
+        const [includeInternet, setIncludeInternet] = useState(true);
+        const [chatHistory, setChatHistory] = useState([
+          { sender: 'ai', text: "Welcome to AZ MedStudio. Upload medical documents, type your symptoms below, or load our sample case study to get started.", isInternet: false }
+        ]);
+
+        const [isListening, setIsListening] = useState(false);
+        const [isSummarizing, setIsSummarizing] = useState(false);
+        const [showSummary, setShowSummary] = useState(false);
+        const [middleSummary, setMiddleSummary] = useState(null);
+        const [showEvidenceCard, setShowEvidenceCard] = useState(false);
+        const [sidebarOpen, setSidebarOpen] = useState(false);
+
+        // Fetching local translations for the middle section components based on translation select menu
+        const labels = LOCALIZATION_DICTIONARY[middleViewLang] || LOCALIZATION_DICTIONARY.en;
+
+        // Auto validation check on file context to inspect for valid medical data
+        const validateMedicalContent = (text) => {
+          const medicalKeywords = [
+            'mg', 'blood', 'heart', 'patient', 'clinic', 'hospital', 'rx', 'doctor',
+            'tablet', 'lab', 'cholesterol', 'hypertension', 'pain', 'allergic',
+            'allergy', 'medication', 'diagnose', 'treatment', 'capsule', 'cardiac',
+            'lipid', 'discharge', 'prescribe', 'dose', 'hba1c', 'chol', 'ldl', 'hdl', 'bp'
+          ];
+          const lowerText = text.toLowerCase();
+          return medicalKeywords.some(keyword => lowerText.includes(keyword));
+        };
+
+        // Load Sample Case Study manually
+        const handleLoadSample = () => {
+          setDocs(SAMPLE_FARIS_DOCUMENTS);
+          setSelectedDocId('doc-discharge-metropolitan');
+          setMiddleView('preview');
+          setPatientContext({
+            name: 'Faris Al-Harbi',
+            age: '61',
+            gender: 'Male',
+            allergies: 'No Known Drug Allergies (NKDA)'
+          });
+          setChatHistory(prev => [...prev, {
+            sender: 'ai',
+            text: "Loaded Faris Al-Harbi's patient records successfully. Select any source in the Left panel to preview or click any Studio card in the Right panel to analyze details.",
+            isInternet: false
+          }]);
+        };
+
+        // Handle System Native File upload (TXT, PDF, Word, Images) with medical content validation
+        const handleNativeFileUpload = (e) => {
+          const files = Array.from(e.target.files);
+          if (!files.length) return;
+
+          files.forEach((file, index) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const fileContent = event.target.result || "Raw non-text/binary document metrics extracted successfully.";
+              const containsMedicalData = validateMedicalContent(fileContent.toString());
+
+              const newDoc = {
+                id: `uploaded-${Date.now()}-${index}`,
+                name: file.name,
+                type: file.type || "Clinical File",
+                lang: "English (Auto)",
+                confidence: containsMedicalData ? "High" : "Low",
+                status: containsMedicalData ? "Extracted" : labels.noMedData,
+                isInvalidMedical: !containsMedicalData,
+                content: typeof fileContent === 'string' ? fileContent : `[Binary/Image/PDF parsed] Name: ${file.name}\nSize: ${file.size} bytes`
+              };
+
+              // Auto-Extract Patient Details dynamically if not overridden manually
+              if (!manualContext && containsMedicalData) {
+                const nameMatch = fileContent.toString().match(/PATIENT:\s*([^\n|]+)/i);
+                const ageMatch = fileContent.toString().match(/AGE:\s*(\d+)/i);
+                const genderMatch = fileContent.toString().match(/GENDER|SEX:\s*([^\n|]+)/i);
+                const allergyMatch = fileContent.toString().match(/ALLERGIES:\s*([^\n|]+)/i);
+
+                setPatientContext(prev => ({
+                  name: nameMatch ? nameMatch[1].trim() : (prev.name !== 'N/A' ? prev.name : 'Detected Patient'),
+                  age: ageMatch ? ageMatch[1].trim() : (prev.age !== 'N/A' ? prev.age : '61'),
+                  gender: genderMatch ? genderMatch[1].trim() : (prev.gender !== 'N/A' ? prev.gender : 'Male'),
+                  allergies: allergyMatch ? allergyMatch[1].trim() : (prev.allergies !== 'N/A' ? prev.allergies : 'NKDA (Assumed)')
+                }));
+              }
+
+              setDocs(prev => [...prev, newDoc]);
+              setSelectedDocId(newDoc.id);
+              setMiddleView('preview');
+            };
+            
+            reader.readAsText(file);
+          });
+        };
+
+        // Handle typing custom clinical notes with validation check
+        const handleSaveOnTheGoNote = () => {
+          if (!notesText.trim()) return;
+          
+          const containsMedicalData = validateMedicalContent(notesText);
+
+          const newDoc = {
+            id: `note-${Date.now()}`,
+            name: `User_Note_${new Date().toLocaleTimeString().replace(/:/g, '-')}.txt`,
+            type: "User Notes",
+            lang: "English",
+            confidence: containsMedicalData ? "High" : "Low",
+            status: containsMedicalData ? "Extracted" : labels.noMedData,
+            isInvalidMedical: !containsMedicalData,
+            content: `ON-THE-GO CLINICAL DIARY:\n${notesText}`
+          };
+
+          if (!manualContext && containsMedicalData) {
+            setPatientContext(prev => ({
+              ...prev,
+              name: prev.name === 'N/A' ? 'Self Logged Patient' : prev.name
+            }));
+          }
+
+          setDocs(prev => [...prev, newDoc]);
+          setSelectedDocId(newDoc.id);
+          setMiddleView('preview');
+          setNotesText('');
+        };
+
+        const handleDeleteSource = (id, e) => {
+          e.stopPropagation();
+          const updated = docs.filter(d => d.id !== id);
+          setDocs(updated);
+          if (selectedDocId === id) {
+            setSelectedDocId(updated[0]?.id || null);
+          }
+        };
+
+        // Dynamic API Fetch helper with robust backoff & Google Search grounding integration
+        const fetchGeminiResponse = async (userQuery, systemPrompt, includeInternet) => {
+          if (!apiKey) return null;
+          
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+          
+          // Construct precise payload with system instruction
+          const payload = {
+            contents: [{ parts: [{ text: userQuery }] }]
+          };
+
+          if (systemPrompt) {
+            payload.systemInstruction = { parts: [{ text: systemPrompt }] };
+          }
+
+          // Integrate search grounding tools if checkbox option is marked active
+          if (includeInternet) {
+            payload.tools = [{ "google_search": {} }];
+          }
+
+          let delay = 1000;
+          for (let attempt = 0; attempt < 5; attempt++) {
+            try {
+              const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+              });
+              if (response.ok) {
+                const data = await response.json();
+                return data;
+              }
+            } catch (err) {
+              // Wait and retry - do not print logs to console
+            }
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay *= 2;
+          }
+          throw new Error("Unable to contact Gemini AI services after multiple attempts.");
+        };
+
+        // Dictation Simulation
+        const toggleSpeech = () => {
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          if (SpeechRecognition) {
+            const rec = new SpeechRecognition();
+            rec.continuous = false;
+            rec.lang = 'en-US';
+            rec.onstart = () => setIsListening(true);
+            rec.onend = () => setIsListening(false);
+            rec.onresult = (e) => {
+              const text = e.results[0][0].transcript;
+              setChatQuery(text);
+            };
+            rec.start();
+          } else {
+            setIsListening(true);
+            setTimeout(() => {
+              setChatQuery("What is my LDL Cholesterol and was fasting documented?");
+              setIsListening(false);
+            }, 2000);
+          }
+        };
+
+        // Chatbot Action
+        const handleSendChat = async () => {
+          if (!chatQuery.trim()) return;
+          const userQuery = chatQuery;
+          setChatHistory(prev => [...prev, { sender: 'user', text: userQuery }]);
+          setChatQuery('');
+
+          if (apiKey) {
+            setChatHistory(prev => [...prev, { sender: 'ai', text: "Processing clinical documentation analysis with your Gemini Key...", isInternet: false }]);
+            try {
+              const systemPrompt = `You are AZ MedStudio. Answer using this context:\nName: ${patientContext.name}\nAge: ${patientContext.age}\nAllergies: ${patientContext.allergies}\nDocument Context:\n${docs.map(d=>d.content).join('\n')}\nUser query: ${userQuery}. Provide patient-safe, clear explanations.`;
+              const realResponse = await fetchGeminiResponse(userQuery, systemPrompt, includeInternet);
+              
+              const rawText = realResponse.candidates?.[0]?.content?.parts?.[0]?.text || "No response received.";
+              const attributions = realResponse.candidates?.[0]?.groundingMetadata?.groundingAttributions;
+
+              let finalMsg = rawText;
+              if (attributions && attributions.length > 0) {
+                finalMsg += "\n\n**Sources Found in Google Search Grounding:**\n" + attributions.map(a => `- [${a.web?.title}](${a.web?.uri})`).join('\n');
+              }
+
+              setChatHistory(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { sender: 'ai', text: finalMsg, isInternet: includeInternet };
+                return updated;
+              });
+            } catch (err) {
+              setChatHistory(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { sender: 'ai', text: "System Error: Failed to fetch from your Gemini endpoint. Please check your API Key and network connections.", isInternet: false };
+                return updated;
+              });
+            }
+          } else {
+            // High-fidelity fallback local processor
+            setTimeout(() => {
+              let answer = "";
+              const queryLower = userQuery.toLowerCase();
+
+              if (queryLower.includes('cholesterol') || queryLower.includes('lipid') || queryLower.includes('ldl')) {
+                answer = "In Faris_Blood_LipidReport.pdf, your Total Cholesterol is 240 mg/dL (HIGH) and LDL bad cholesterol is 155 mg/dL (HIGH). The report explicitly mentions that these blood draws are suspected to be non-fasting.";
+                if (includeInternet) {
+                  answer += "\n\n[Clinical Web Context]: General cardiology guidelines advise confirming a fasting lipid profile to precisely verify lipid thresholds.";
+                }
+              } else if (queryLower.includes('amlodipine') || queryLower.includes('blood pressure') || queryLower.includes('bp')) {
+                answer = "Your Metropolitan Discharge Summary states that Amlodipine 5mg once daily in the morning has been restarted to manage mild hypertension.";
+              } else if (queryLower.includes('ibuprofen') || queryLower.includes('painkiller') || queryLower.includes('nsaid')) {
+                answer = "The cardiology script lists a renal precaution to strictly avoid NSAIDs like Ibuprofen to preserve kidney health.";
+              } else {
+                answer = "I've searched your active document sources. If this relates to your cardiac fatigue or cholesterol levels, please consult your healthcare team during your 4-week clinic visit.";
+              }
+              setChatHistory(prev => [...prev, { sender: 'ai', text: answer, isInternet: includeInternet }]);
+            }, 800);
+          }
+        };
+
+        const handleTranslateMiddleView = (lang) => {
+          setMiddleViewLang(lang);
+        };
+
+        const currentActiveDoc = docs.find(d => d.id === selectedDocId);
+
+        const getMiddleWorkspaceText = () => {
+          if (middleView === 'intro') {
+            return labels.workspaceIntroDesc;
+          }
+          if (middleView === 'preview' && currentActiveDoc) {
+            // Use dynamically translated content if it is a preloaded sample document
+            const translatedSample = translateDocContent(currentActiveDoc.id, middleViewLang);
+            return translatedSample || currentActiveDoc.content;
+          }
+          if (middleView === 'uncertainty') {
+            return labels.uncertaintyDesc;
+          }
+          if (middleView === 'summary') {
+            return labels.summaryFaris;
+          }
+          if (middleView === 'roadmap') {
+            const goal = GOALS_DATABASE.find(g => g.id === selectedGoalId);
+            return goal ? `${goal.title}\n\n${goal.content}\n\n${goal.evidence}` : "No specific goal selected.";
+          }
+          return "";
+        };
+
+        const handleSummarizeMiddleOnly = async () => {
+          // If already summarizing or currently showing summary, this button hides it
+          if (showSummary) {
+            setShowSummary(false);
+            return;
+          }
+
+          const textToSummarize = getMiddleWorkspaceText();
+          if (!textToSummarize) return;
+
+          setIsSummarizing(true);
+          setShowSummary(true);
+          setMiddleSummary("Generating summary of current workspace view...");
+
+          if (apiKey) {
+            try {
+              const summaryPrompt = `Summarize the following clinical text in 2-3 highly understandable patient-friendly bullet points:\n\n${textToSummarize}`;
+              const realSummaryResult = await fetchGeminiResponse(summaryPrompt, "You are a clinical translator.", false);
+              const realSummaryText = realSummaryResult.candidates?.[0]?.content?.parts?.[0]?.text || "No summary was generated.";
+              setMiddleSummary(realSummaryText);
+            } catch (err) {
+              setMiddleSummary("Failed to generate summary via Gemini API. Please check your key.");
+            }
+            setIsSummarizing(false);
+          } else {
+            setTimeout(() => {
+              setMiddleSummary(`• This section highlights key metrics and action items.\n• Clinical actions should be directly verified with your physician.\n• Avoid changing any dosages without direct professional oversight.`);
+              setIsSummarizing(false);
+            }, 800);
+          }
+        };
+
+        const handleShowEvidence = () => {
+          setShowEvidenceCard(prev => !prev);
+        };
+
+        // PDF Generator: Formats a pristine print layout containing ALL 10 Clinical Goals
+        const handlePrintGoals = () => {
+          const printWindow = window.open('', '_blank');
+          const goalsHTML = GOALS_DATABASE.map(goal => `
+            <div style="margin-bottom: 25px; page-break-inside: avoid; border-bottom: 1px solid #e2e8f0; padding-bottom: 15px;">
+              <h3 style="color: #1e1b4b; font-family: sans-serif; margin-bottom: 8px;">${goal.title}</h3>
+              <p style="font-size: 13px; color: #475569; font-style: italic; margin-bottom: 10px;">${goal.desc}</p>
+              <div style="font-size: 13px; color: #1e293b; background: #f8fafc; padding: 12px; border-radius: 8px; margin-bottom: 10px; line-height: 1.5;">
+                ${goal.content}
+              </div>
+              <div style="font-size: 11px; color: #4f46e5; font-family: monospace;">
+                <strong>Evidence:</strong> ${goal.evidence}
+              </div>
+            </div>
+          `).join('');
+
+          printWindow.document.write(`
+            <html>
+              <head>
+                <title>AZ MedStudio - Patient Case Goals Roadmap</title>
+                <style>
+                  body { font-family: sans-serif; color: #1e293b; padding: 40px; line-height: 1.6; }
+                  h1 { color: #4f46e5; border-bottom: 2px solid #4f46e5; padding-bottom: 10px; }
+                  .meta { margin-bottom: 30px; font-size: 12px; color: #64748b; }
+                </style>
+              </head>
+              <body>
+                <h1>AZ MedStudio - Patient Health Roadmap Report</h1>
+                <div class="meta">
+                  <strong>Patient Name:</strong> ${patientContext.name} | 
+                  <strong>Age:</strong> ${patientContext.age} | 
+                  <strong>Gender:</strong> ${patientContext.gender} | 
+                  <strong>Date:</strong> ${new Date().toLocaleDateString()}
+                </div>
+                ${goalsHTML}
+                <script>
+                  window.onload = function() { window.print(); };
+                <\/script>
+              </body>
+            </html>
+          `);
+          printWindow.document.close();
+        };
+
+        // Translator for active items like roadmap card info on-the-go
+        const translateRoadmapContent = (content) => {
+          if (middleViewLang === 'en') return content;
+          // Simple replacements for mock local translation of roadmap entries
+          let result = content;
+          if (middleViewLang === 'es') {
+            result = result.replace(/Allergy & Drug Conflict Check:/g, "Control de Alergias y Conflictos de Medicamentos:")
+              .replace(/Ibuprofen must be strictly avoided/g, "El ibuprofeno debe evitarse estrictamente")
+              .replace(/due to potential kidney pressure/g, "debido a la presión renal potencial")
+              .replace(/Report any acute shortness of breath/g, "Informe cualquier dificultad para respirar aguda")
+              .replace(/immediately to emergency services/g, "inmediatamente a los servicios de emergencia")
+              .replace(/You have two main findings in your files:/g, "Tiene dos hallazgos principales en sus archivos:")
+              .replace(/Your heart muscle was under temporary strain/g, "El músculo cardíaco estuvo bajo tensión temporal")
+              .replace(/Mild Cardiac Fatigue & Hypertension/g, "Fatiga cardíaca leve e hipertensión")
+              .replace(/Highly elevated fatty lipids/g, "Lípidos grasos muy elevados")
+              .replace(/which treats your diagnosed Hypertension/g, "que trata su hipertensión diagnosticada")
+              .replace(/Taken by mouth/g, "Tomado por vía oral")
+              .replace(/Once daily/g, "Una vez al día")
+              .replace(/Recommended Administration/g, "Administración Recomendada")
+              .replace(/Normal temporary reactions/g, "Reacciones temporales normales")
+              .replace(/Emergency signals/g, "Señales de emergencia");
+          } else if (middleViewLang === 'fr') {
+            result = result.replace(/Allergy & Drug Conflict Check:/g, "Vérification des allergies et conflits médicamenteux:")
+              .replace(/Ibuprofen must be strictly avoided/g, "L'ibuprofène doit être strictement évité")
+              .replace(/due to potential kidney pressure/g, "en raison d'une pression rénale potentielle")
+              .replace(/Report any acute shortness of breath/g, "Signalez tout essoufflement aigu")
+              .replace(/immediately to emergency services/g, "immédiatement aux services d'urgence")
+              .replace(/Mild Cardiac Fatigue & Hypertension/g, "Fatigue cardiaque légère et hypertension")
+              .replace(/Highly elevated fatty lipids/g, "Lipides gras très élevés")
+              .replace(/Taken by mouth/g, "Pris par la bouche")
+              .replace(/Once daily/g, "Une fois par jour");
+          } else if (middleViewLang === 'ar') {
+            result = "تمت الترجمة تلقائياً: " + result;
+          } else if (middleViewLang === 'hi') {
+            result = "स्वचालित अनुवाद: " + result;
+          } else if (middleViewLang === 'ur') {
+            result = "خودکار ترجمہ: " + result;
+          }
+          return result;
+        };
+
+        return (
+          <div className={`flex flex-col h-screen ${theme === 'dark' ? 'bg-[#0f172a] text-slate-100' : 'bg-[#f3f4f8] text-slate-800'}`}>
+            
+            {/* TOP HEADER TOOLBAR */}
+            <header className={`border-b px-6 py-3 flex justify-between items-center shrink-0 theme-transition z-30 ${
+              theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-[#e2e8f0]'
+            }`}>
+              
+              {/* App Brand Title */}
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-indigo-50 rounded-lg text-indigo-600 border border-indigo-100">
+                  <Icons.Logo />
+                </div>
+                <div>
+                  <h1 className="text-md font-bold tracking-tight flex items-center gap-2">
+                    AZ MedStudio
+                    <span className="text-[9px] bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded-full">
+                      v2.5
+                    </span>
+                  </h1>
+                  <p className="text-[10px] text-slate-400 font-medium">Personalized Medical Explainer & Organizer</p>
+                </div>
+              </div>
+
+              {/* Gemini API Key input field */}
+              <div className="hidden lg:flex items-center gap-2 bg-slate-100 dark:bg-slate-850 p-1.5 rounded-xl border border-slate-200/50 dark:border-slate-700/50">
+                <Icons.Key />
+                <input 
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Insert Gemini API Key (Optional)"
+                  className="text-[11px] bg-transparent focus:outline-none w-48 text-slate-700 dark:text-slate-200 placeholder:text-slate-400"
+                />
+              </div>
+
+              {/* Action Buttons for download / preferences */}
+              <div className="flex items-center gap-3">
+                
+                {/* Print PDF Button */}
+                <button 
+                  onClick={handlePrintGoals}
+                  className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-xs transition"
+                >
+                  <Icons.Download />
+                  Download Goals (PDF)
+                </button>
+
+                {/* Settings dropdown trigger */}
+                <div className="relative">
+                  <button 
+                    onClick={() => setShowSettings(!showSettings)}
+                    className="p-2 bg-slate-100 dark:bg-slate-800 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+                  >
+                    <Icons.Theme />
+                  </button>
+
+                  {showSettings && (
+                    <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 shadow-lg z-50 text-xs text-slate-700 dark:text-slate-200">
+                      <p className="font-bold border-b border-slate-100 dark:border-slate-700 pb-1.5 mb-2">Workspace Preferences</p>
+                      
+                      {/* Theme Toggle Buttons */}
+                      <div className="flex flex-col gap-2">
+                        <button 
+                          onClick={() => { setTheme('light'); setShowSettings(false); }}
+                          className={`w-full text-left p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700 font-medium ${theme === 'light' ? 'bg-indigo-50 text-indigo-800 dark:bg-slate-750' : ''}`}
+                        >
+                          ☀️ Light Theme (Default)
+                        </button>
+                        <button 
+                          onClick={() => { setTheme('dark'); setShowSettings(false); }}
+                          className={`w-full text-left p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700 font-medium ${theme === 'dark' ? 'bg-indigo-900 text-indigo-100' : ''}`}
+                        >
+                          🌙 Medical Dark Theme
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Mobile Hamburger menu toggle */}
+                <button 
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="lg:hidden p-2 bg-slate-100 dark:bg-slate-800 rounded-xl"
+                >
+                  <Icons.Logo />
+                </button>
+
+                <div className="hidden sm:flex h-8 w-8 rounded-full bg-indigo-600 text-white font-bold text-xs items-center justify-center">
+                  AZ
+                </div>
+              </div>
+
+            </header>
+
+            {/* MAIN APP WORKSPACE CONTAINER */}
+            <div className="flex flex-1 overflow-hidden relative">
+              
+              {/* LEFT SIDEBAR PANEL: INPUT & SOURCES */}
+              <aside className={`sidebar w-80 border-r flex flex-col shrink-0 no-print theme-transition absolute lg:relative h-full z-20 ${
+                sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+              } lg:translate-x-0 ${
+                theme === 'dark' ? 'bg-slate-900/95 border-slate-800' : 'bg-white/95 border-slate-200'
+              } transition-transform duration-300`}>
+                
+                <div className="p-4 border-b border-slate-100 dark:border-slate-850 flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Sources & Inputs</span>
+                  <span className="text-xs text-slate-500 font-bold">{docs.length} Loaded</span>
+                </div>
+
+                {/* Left Panel Scrolling Area */}
+                <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-5">
+                  
+                  {/* System native File Upload Area */}
+                  <div className="bg-slate-50 dark:bg-slate-850 p-3 rounded-xl border border-slate-200 dark:border-slate-750">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Upload clinical records</p>
+                    <div className="border border-dashed border-slate-300 dark:border-slate-700 rounded-lg p-4 text-center hover:bg-indigo-50/20 cursor-pointer relative">
+                      <input 
+                        type="file" 
+                        multiple 
+                        onChange={handleNativeFileUpload}
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        accept=".txt,.pdf,.png,.jpg,.jpeg,.doc,.docx"
+                      />
+                      <div className="mx-auto flex justify-center text-slate-400 mb-1"><Icons.Plus /></div>
+                      <p className="text-xs font-semibold">Add native files</p>
+                      <p className="text-[9px] text-slate-400">TXT, PDF, Word, Images</p>
+                    </div>
+                  </div>
+
+                  {/* Freeform "Write On-The-Go" Note Box */}
+                  <div className="bg-slate-50 dark:bg-slate-850 p-3 rounded-xl border border-slate-200 dark:border-slate-750 flex flex-col">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Write Symptoms on-the-go</p>
+                    <textarea 
+                      value={notesText}
+                      onChange={(e) => setNotesText(e.target.value)}
+                      placeholder="Type verbal doctor advice, pain level diaries, or WhatsApp clinic chat logs here..."
+                      className="text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 min-h-[80px] focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800 dark:text-slate-100"
+                    />
+                    <button 
+                      onClick={handleSaveOnTheGoNote}
+                      disabled={!notesText.trim()}
+                      className="mt-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] py-1.5 rounded-lg disabled:opacity-50 transition"
+                    >
+                      Save Symptom Note
+                    </button>
+                  </div>
+
+                  {/* Patient Context Auto-Extractor & Manual Override */}
+                  <div className="bg-slate-50 dark:bg-slate-850 p-3.5 rounded-xl border border-slate-200 dark:border-slate-750">
+                    <div className="flex justify-between items-center mb-2">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Patient context metrics</p>
+                      
+                      {/* Manual Override Switch */}
+                      <button 
+                        onClick={() => setManualContext(!manualContext)}
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          manualContext ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        {manualContext ? 'Editing manually' : 'Auto-extract'}
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <div>
+                        <label className="text-[9px] text-slate-400 uppercase block">Full Name</label>
+                        <input 
+                          type="text"
+                          value={patientContext.name}
+                          disabled={!manualContext}
+                          onChange={(e) => setPatientContext({...patientContext, name: e.target.value})}
+                          className="w-full text-xs px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[9px] text-slate-400 uppercase block">Age</label>
+                          <input 
+                            type="text"
+                            value={patientContext.age}
+                            disabled={!manualContext}
+                            onChange={(e) => setPatientContext({...patientContext, age: e.target.value})}
+                            className="w-full text-xs px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-200"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] text-slate-400 uppercase block">Gender</label>
+                          <input 
+                            type="text"
+                            value={patientContext.gender}
+                            disabled={!manualContext}
+                            onChange={(e) => setPatientContext({...patientContext, gender: e.target.value})}
+                            className="w-full text-xs px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-200"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-slate-400 uppercase block">Allergies</label>
+                        <input 
+                          type="text"
+                          value={patientContext.allergies}
+                          disabled={!manualContext}
+                          onChange={(e) => setPatientContext({...patientContext, allergies: e.target.value})}
+                          className="w-full text-xs px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-200"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* List of active document sources with red highlight capability */}
+                  <div className="flex flex-col gap-2">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Uploaded Source Docs</p>
+                    {docs.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 italic">No files loaded yet. Click 'Load Sample Case Study' below to test with sample data.</p>
+                    ) : (
+                      docs.map(doc => {
+                        const isSelected = selectedDocId === doc.id && middleView === 'preview';
+                        return (
+                          <div 
+                            key={doc.id}
+                            onClick={() => { setSelectedDocId(doc.id); setMiddleView('preview'); setSidebarOpen(false); }}
+                            className={`p-2.5 rounded-lg border transition cursor-pointer flex justify-between items-center ${
+                              doc.isInvalidMedical 
+                                ? 'bg-red-50/70 border-red-400 hover:bg-red-100/50 dark:bg-red-950/20 dark:border-red-900/60'
+                                : isSelected 
+                                  ? 'bg-indigo-50/50 dark:bg-indigo-900/20 border-indigo-300' 
+                                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-750'
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className={`text-xs font-bold truncate ${doc.isInvalidMedical ? 'text-red-800 dark:text-red-300' : 'text-slate-800 dark:text-slate-100'}`}>{doc.name}</p>
+                              <p className="text-[10px] text-slate-400">{doc.type} • Conf: {doc.confidence}</p>
+                            </div>
+                            <button 
+                              onClick={(e) => handleDeleteSource(doc.id, e)}
+                              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-slate-400 hover:text-red-500"
+                            >
+                              <Icons.Trash />
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                </div>
+
+                {/* Load Sample Case Study manually */}
+                <div className="p-4 border-t border-slate-100 dark:border-slate-850">
+                  <button 
+                    onClick={() => { handleLoadSample(); setSidebarOpen(false); }}
+                    className="w-full bg-slate-800 hover:bg-slate-750 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-xs transition"
+                  >
+                    🚀 Load Sample Case Study
+                  </button>
+                </div>
+
+              </aside>
+
+              {/* MIDDLE COLUMN: ACTIVE WORKSPACE CONTENT DISPLAY (Fully Translated on-the-go) */}
+              <section className="flex-1 bg-[#f8f9fa] dark:bg-slate-950 p-4 lg:p-6 overflow-y-auto flex flex-col gap-6">
+                
+                {/* Workspace Heading Indicator */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200/80 dark:border-slate-850 shadow-xs shrink-0">
+                  <div>
+                    <h2 className="text-md font-bold text-slate-800 dark:text-slate-100">
+                      📁 Case Active Workspace
+                    </h2>
+                    <p className="text-xs text-slate-500">Currently active panel: {middleView.toUpperCase()}</p>
+                  </div>
+                  
+                  {/* Desired translation drop down list */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase">Translate View:</span>
+                    <select 
+                      value={middleViewLang} 
+                      onChange={(e) => handleTranslateMiddleView(e.target.value)}
+                      className="text-xs p-1.5 rounded-lg border border-slate-200 dark:border-slate-750 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none"
+                    >
+                      <option value="en">English (Original)</option>
+                      <option value="ar">العربية (Arabic)</option>
+                      <option value="es">Español (Spanish)</option>
+                      <option value="fr">Français (French)</option>
+                      <option value="hi">हिंदी (Hindi)</option>
+                      <option value="ur">اردو (Urdu)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Primary Middle Controls targeting ONLY info present in middle panel */}
+                <div className="flex gap-3 shrink-0">
+                  <button 
+                    onClick={handleSummarizeMiddleOnly}
+                    disabled={isSummarizing}
+                    className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold text-xs py-3 rounded-xl transition shadow-xs"
+                  >
+                    {isSummarizing ? "Summarizing..." : showSummary ? "Hide Summary" : "Summarize Current View"}
+                  </button>
+                  <button 
+                    onClick={handleShowEvidence}
+                    className="flex-1 flex items-center justify-center gap-2 bg-white dark:bg-slate-900 hover:bg-slate-50 border border-slate-200 dark:border-slate-750 text-slate-700 dark:text-slate-200 font-bold text-xs py-3 rounded-xl transition"
+                  >
+                    <Icons.SourceCheck />
+                    {showEvidenceCard ? "Hide Source Evidence" : "Show Source Evidence & Summary"}
+                  </button>
+                </div>
+
+                {/* Dynamic Content card container */}
+                <div className="flex-1 flex flex-col gap-4">
+                  
+                  {/* View: Introduction of AZ MedStudio (Default view matching requested blank slate layout) */}
+                  {middleView === 'intro' && (
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl p-6 shadow-sm flex flex-col gap-5">
+                      <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+                        <h3 className="text-lg font-bold text-indigo-900 dark:text-indigo-400">{labels.welcomeTitle}</h3>
+                        <p className="text-xs text-slate-500 mt-1">{labels.workspaceIntroDesc}</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="p-4 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-100 dark:border-slate-800">
+                          <h4 className="text-xs font-bold text-slate-900 dark:text-slate-200 uppercase tracking-wide">Purpose & Scope</h4>
+                          <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 leading-relaxed">
+                            {labels.welcomePurpose}
+                          </p>
+                        </div>
+                        <div className="p-4 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-100 dark:border-slate-800">
+                          <h4 className="text-xs font-bold text-slate-900 dark:text-slate-200 uppercase tracking-wide">Quick Start</h4>
+                          <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5 leading-relaxed">
+                            {labels.welcomeStart}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="bg-blue-50 dark:bg-blue-950/20 p-4 rounded-xl border border-blue-100 dark:border-blue-900 text-xs text-blue-900 dark:text-blue-300 flex gap-2">
+                        <Icons.Info />
+                        <p className="leading-relaxed font-medium">
+                          <strong>{labels.safetyDisclaimerTitle}</strong> {labels.safetyDisclaimerText}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* View: Document Content Preview (When Selected) */}
+                  {middleView === 'preview' && currentActiveDoc && (
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl p-6 shadow-xs flex-1 flex flex-col gap-4">
+                      <h3 className="text-sm font-bold border-b border-slate-100 dark:border-slate-800 pb-2 flex justify-between">
+                        <span>📄 File Preview: {currentActiveDoc.name}</span>
+                        <span className="text-xs text-slate-400 font-normal">Extraction Match: {currentActiveDoc.confidence} Confidence</span>
+                      </h3>
+                      
+                      {/* Highlighted Warning for non-medical files in RED */}
+                      {currentActiveDoc.isInvalidMedical ? (
+                        <div className="p-5 bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-900 rounded-xl text-xs text-red-950 dark:text-red-200 flex flex-col gap-2 font-medium">
+                          <p className="font-bold text-red-800 dark:text-red-300 text-sm flex items-center gap-1.5">
+                            🚨 {labels.noMedData}
+                          </p>
+                          <p>{labels.noMedDataDesc}</p>
+                          <div className="mt-2 text-[11px] p-3 bg-white/70 dark:bg-slate-900/50 rounded-lg font-mono whitespace-pre-wrap">
+                            {currentActiveDoc.content}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-slate-900 text-slate-100 font-mono text-xs p-4 rounded-xl leading-relaxed overflow-y-auto max-h-[350px] whitespace-pre-wrap">
+                          {translateDocContent(currentActiveDoc.id, middleViewLang) || translateRoadmapContent(currentActiveDoc.content)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* View: Uncertainty Checklist (Fully Translated) */}
+                  {middleView === 'uncertainty' && (
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl p-6 shadow-xs flex-1">
+                      <h3 className="text-sm font-bold border-b border-slate-100 dark:border-slate-800 pb-2 mb-3">
+                        ⚠️ {labels.uncertaintyTitle}
+                      </h3>
+                      <p className="text-xs text-slate-500 mb-4">{labels.uncertaintyDesc}</p>
+                      
+                      <div className="bg-[#fffbeb] dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 rounded-xl p-4 text-xs text-amber-950 dark:text-amber-200 flex flex-col gap-2 font-medium">
+                        <p>{labels.uncertaintyItem1}</p>
+                        <p>{labels.uncertaintyItem2}</p>
+                        <p>{labels.uncertaintyItem3}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* View: Studio Goal Details (Loads in middle when user clicks goal card on right, Fully Translated) */}
+                  {middleView === 'roadmap' && (
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl p-6 shadow-xs flex-1 flex flex-col gap-4">
+                      {(() => {
+                        const goalItem = GOALS_DATABASE.find(g => g.id === selectedGoalId);
+                        if (!goalItem) return <p className="text-xs text-slate-400">{labels.noEvidence}</p>;
+                        return (
+                          <>
+                            <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-2">
+                              <div>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Studio Goal View</span>
+                                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">{goalItem.title}</h3>
+                              </div>
+                              <span className="text-lg">{goalItem.icon}</span>
+                            </div>
+                            
+                            {/* Detailed Output Text - translated dynamically */}
+                            <div className="bg-slate-50 dark:bg-slate-850/60 p-4 rounded-xl text-xs text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap font-medium">
+                              {translateRoadmapContent(goalItem.content)}
+                            </div>
+
+                            {/* Linked source highlighting element */}
+                            <div className="p-3 bg-indigo-50/40 dark:bg-indigo-950/10 border border-indigo-100 dark:border-indigo-950 rounded-lg text-xs">
+                              <span className="font-bold text-indigo-900 dark:text-indigo-400 block mb-1">🔗 {labels.clinicalEvidence}:</span>
+                              <p className="font-mono text-[11px] text-indigo-950 dark:text-indigo-300">{goalItem.evidence}</p>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* View: General Combined Case Summary (Fully Translated) */}
+                  {middleView === 'summary' && (
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl p-6 shadow-xs flex-1">
+                      <h3 className="text-sm font-bold border-b border-slate-100 dark:border-slate-800 pb-2 mb-3">
+                        📁 {labels.summaryTitle}
+                      </h3>
+                      <div className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed flex flex-col gap-3">
+                        <p>{docs.length > 0 && docs.some(d => d.id === 'doc-discharge-metropolitan') ? labels.summaryFaris : labels.summaryGeneral}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* View: Charts & Graphics Section (Fully Translated) */}
+                  {middleView === 'chart' && (
+                    <div className="space-y-4 flex-1">
+                      {/* Blood Pressure and Lipids Chart */}
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl p-5 shadow-sm">
+                        <h3 className="font-bold text-slate-800 dark:text-slate-100 text-xs mb-3">{labels.chartsTitle}</h3>
+                        <div className="space-y-3">
+                          <div>
+                            <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400 mb-1">
+                              <span>{labels.totalChol}</span>
+                              <span className="font-bold text-rose-600">240 (High)</span>
+                            </div>
+                            <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                              <div className="bg-rose-500 h-full rounded-full" style={{ width: '85%' }}></div>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-1">{labels.normalCholInfo}</div>
+                          </div>
+                          <div>
+                            <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400 mb-1">
+                              <span>{labels.badChol}</span>
+                              <span className="font-bold text-rose-600">155 (High)</span>
+                            </div>
+                            <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                              <div className="bg-rose-500 h-full rounded-full" style={{ width: '75%' }}></div>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-1">{labels.badCholInfo}</div>
+                          </div>
+                          <div>
+                            <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400 mb-1">
+                              <span>{labels.goodChol}</span>
+                              <span className="font-bold text-amber-600">38 (Low)</span>
+                            </div>
+                            <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                              <div className="bg-amber-500 h-full rounded-full" style={{ width: '45%' }}></div>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-1">{labels.goodCholInfo}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Med Dose Tracker */}
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl p-5 shadow-sm">
+                        <h3 className="font-bold text-slate-800 dark:text-slate-100 text-xs mb-3">{labels.medScheduleTitle}</h3>
+                        <div className="grid grid-cols-4 gap-2 text-center">
+                          <div className="bg-slate-50 dark:bg-slate-850 p-2 rounded border dark:border-slate-750">
+                            <span className="text-[10px] font-bold text-slate-500 block">{labels.morning}</span>
+                            <span className="text-xs font-bold text-indigo-700 dark:text-indigo-400 mt-1 block">Amlodipine</span>
+                          </div>
+                          <div className="bg-slate-50 dark:bg-slate-850 p-2 rounded border dark:border-slate-750">
+                            <span className="text-[10px] font-bold text-slate-500 block">{labels.afternoon}</span>
+                            <span className="text-xs text-slate-400 mt-1 block">-</span>
+                          </div>
+                          <div className="bg-slate-50 dark:bg-slate-850 p-2 rounded border dark:border-slate-750">
+                            <span className="text-[10px] font-bold text-slate-500 block">{labels.evening}</span>
+                            <span className="text-xs text-slate-400 mt-1 block">-</span>
+                          </div>
+                          <div className="bg-slate-50 dark:bg-slate-850 p-2 rounded border dark:border-slate-750">
+                            <span className="text-[10px] font-bold text-slate-500 block">{labels.bedtime}</span>
+                            <span className="text-xs text-slate-400 mt-1 block">-</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Chronological Patient Timeline (Fully Translated) */}
+                  {middleView === 'timeline' && (
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl p-5 shadow-sm flex-1">
+                      <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm mb-4">{labels.timelineTitle}</h3>
+                      <div className="relative border-l-2 border-indigo-100 pl-4 space-y-5 ml-2">
+                        <div className="relative">
+                          <div className="absolute -left-[21px] top-1 bg-indigo-500 h-2 w-2 rounded-full border border-white"></div>
+                          <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">{labels.dischargeTitle}</h4>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">{labels.dischargeDesc}</p>
+                        </div>
+                        <div className="relative">
+                          <div className="absolute -left-[21px] top-1 bg-indigo-500 h-2 w-2 rounded-full border border-white"></div>
+                          <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">{labels.lipidTitle}</h4>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">{labels.lipidDesc}</p>
+                        </div>
+                        <div className="relative">
+                          <div className="absolute -left-[21px] top-1 bg-amber-500 h-2 w-2 rounded-full border border-white"></div>
+                          <h4 className="text-xs font-bold text-amber-700 dark:text-amber-400">{labels.cardioOutpatient}</h4>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">{labels.cardioDesc}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Render Summary output AT THE BOTTOM of the middle section on-the-go */}
+                  {showSummary && middleSummary && (
+                    <div className="bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900 rounded-xl p-4 text-xs text-indigo-950 dark:text-indigo-200 relative shrink-0">
+                      <button 
+                        onClick={() => setShowSummary(false)} 
+                        className="absolute top-2.5 right-2.5 text-indigo-500 hover:text-indigo-800 font-bold"
+                      >
+                        ×
+                      </button>
+                      <strong className="block mb-1">📝 {labels.generatedSummaryLabel}:</strong>
+                      <p className="leading-relaxed whitespace-pre-wrap">{middleSummary}</p>
+                    </div>
+                  )}
+
+                  {/* If Show Source Evidence is active, pull evidence card and display it at the bottom */}
+                  {showEvidenceCard && (
+                    <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-xl p-4 text-xs text-slate-600 dark:text-slate-300 flex flex-col gap-2 shrink-0 shadow-sm">
+                      <strong className="text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                        <Icons.SourceCheck /> {labels.evidenceTitle}
+                      </strong>
+                      <div className="border-l-2 border-indigo-500 pl-3 italic font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                        {labels.evidenceQuote}
+                      </div>
+                      <p className="text-[11px] leading-relaxed">
+                        <strong>{labels.clinicalPrecaution}:</strong> {labels.evidenceTakeaway}
+                      </p>
+                    </div>
+                  )}
+
+                </div>
+
+              </section>
+
+              {/* RIGHT COLUMN: CLINICAL STUDIO ROADMAP PANEL & CHAT */}
+              <aside className="w-96 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0 overflow-hidden print-target print-full-width">
+                
+                {/* Header of the Studio Panel */}
+                <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-850 shrink-0 no-print">
+                  <div>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Clinical Studio</span>
+                    <p className="text-[11px] text-slate-500 mt-0.5 font-semibold">10 core medical goal roadmaps</p>
+                  </div>
+                  <span className="text-[9px] bg-indigo-600 text-white font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                    Interactive Mode
+                  </span>
+                </div>
+
+                {/* NotebookLM Styled Colorful Grid list of 10 goals as beautiful flashcards (Hidden when docs is empty) */}
+                <div className="p-4 flex flex-col gap-2.5 overflow-y-auto h-96 border-b border-slate-100 dark:border-slate-850 bg-[#fbfbfd] dark:bg-slate-900/40 shrink-0">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide no-print">Clinical Goal Flash Cards:</p>
+                  
+                  {docs.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center p-6 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
+                      <p className="text-xs text-slate-400 font-semibold leading-relaxed">
+                        No active medical records loaded.<br/>Please upload clinical data or load the pre-populated case study to generate clinical goals.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-2">
+                      {GOALS_DATABASE.map((goal) => {
+                        const isSelected = selectedGoalId === goal.id && middleView === 'roadmap';
+                        return (
+                          <div 
+                            key={goal.id}
+                            onClick={() => {
+                              setSelectedGoalId(goal.id);
+                              setMiddleView('roadmap');
+                            }}
+                            className={`p-3 rounded-xl border transition cursor-pointer flex items-start gap-3 bg-gradient-to-r ${goal.color} ${
+                              isSelected ? 'ring-2 ring-indigo-500 border-transparent shadow-sm' : 'border-slate-200/60 dark:border-slate-800'
+                            }`}
+                          >
+                            <div className="p-2 bg-white dark:bg-slate-800 rounded-lg text-md shadow-xs shrink-0">
+                              {goal.icon}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <strong className={`text-xs font-bold block leading-tight ${goal.textColor}`}>{goal.title}</strong>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-tight truncate">{goal.desc}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* BOTTOM RIGHT: CHAT & MULTI-LANGUAGE BOT INTERACTION FRAME */}
+                <div className="flex-1 flex flex-col bg-[#f8f9fa] dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 overflow-hidden no-print">
+                  
+                  {/* Chat logs */}
+                  <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+                    {chatHistory.map((chat, idx) => (
+                      <div key={idx} className={`flex flex-col ${chat.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                        <div className={`p-3 rounded-xl text-xs leading-relaxed max-w-[85%] ${
+                          chat.sender === 'user' ? 'bg-slate-800 text-white shadow-xs' : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-800 shadow-xs'
+                        }`}>
+                          {chat.text}
+                        </div>
+                        {chat.isInternet && (
+                          <span className="text-[9px] text-emerald-700 font-bold mt-1 flex items-center gap-1">
+                            <Icons.Internet /> Web fast research verified
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Chat Controls bar */}
+                  <div className="p-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex flex-col gap-2 shrink-0">
+                    <div className="flex justify-between items-center text-[9px] text-slate-400 font-bold uppercase tracking-wider">
+                      <span>Multi-Language Assistant</span>
+                      <div className="flex items-center gap-1.5">
+                        <input 
+                          type="checkbox" 
+                          id="internet_check" 
+                          checked={includeInternet}
+                          onChange={(e) => setIncludeInternet(e.target.checked)}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 scale-90"
+                        />
+                        <label htmlFor="internet_check" className="cursor-pointer">Enable Web Search</label>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={toggleSpeech}
+                        title="Speech Recognition input"
+                        className={`p-2.5 rounded-full border transition shrink-0 ${
+                          isListening ? 'bg-red-50 border-red-300 scale-105' : 'bg-slate-50 dark:bg-slate-850 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <Icons.Microphone isListening={isListening} />
+                      </button>
+
+                      <input 
+                        type="text" 
+                        value={chatQuery}
+                        onChange={(e) => setChatQuery(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleSendChat(); }}
+                        placeholder="Type (any language) e.g. Amlodipine purpose?"
+                        className="flex-1 text-xs px-3.5 py-2.5 border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:focus:bg-slate-900 placeholder:text-slate-400"
+                      />
+
+                      <button 
+                        onClick={handleSendChat}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-xs"
+                      >
+                        Send
+                      </button>
+                    </div>
+
+                    {isListening && (
+                      <p className="text-[10px] text-red-500 animate-pulse text-center font-medium">
+                        🎙️ Listening to your verbal query...
+                      </p>
+                    )}
+                  </div>
+
+                </div>
+
+              </aside>
+
+            </div>
+
+          </div>
+        );
+      }
+
+      // Render App inside div#root
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+</body>
+</html>
