@@ -538,7 +538,7 @@
           icon: '✍️',
           color: 'from-amber-50 to-amber-100/50 hover:bg-amber-100/80 dark:from-amber-950/20 dark:to-amber-900/10 dark:border-amber-900/30',
           textColor: 'text-amber-800 dark:text-amber-300',
-          title: "4. Plain Instructions (Shorthand Deco)",
+          title: "4. Plain Instructions (Shorthand Decoder)",
           desc: "Decoding medical shorthand like PO, BID, and QD into understandable daily protocols.",
           content: "- 'PO' = Taken by mouth.\n- 'QD' = Once daily.\n- Recommended Administration: Take Amlodipine 5mg by mouth once daily in the morning with a glass of plain water. Do not skip days even if you feel entirely healthy.",
           evidence: "Source: Faris_Discharge_Metropolitan.txt -> 'Take daily in the morning' and 'PO QD'."
@@ -600,7 +600,7 @@
           textColor: 'text-fuchsia-800 dark:text-fuchsia-300',
           title: "10. Uncertainties & Verification",
           desc: "Addressing smudged prescription terms, unconfirmed fasting states, and timeline missing gaps.",
-          content: "- Smudged Medication: The name of the 10mg medication on the cardiology script is completely illegible and needs direct pediatrician/cardiologist confirmation.\n- Fasting baseline: It is currently unconfirmed if your cholesterol scores represent a fasting baseline.",
+          content: "- Smudged Medication: The name of the 10mg medication on the cardiology script is completely illegible and needs direct pharmacist/cardiologist confirmation.\n- Fasting baseline: It is currently unconfirmed if your cholesterol scores represent a fasting baseline.",
           evidence: "Source: Faris_Cardiology_Script.png -> '[Smudged Name/Unclear Term] 10mg' and Faris_Blood_LipidReport.pdf -> 'Non-fasting lipids suspected'."
         }
       ];
@@ -635,11 +635,34 @@
         const [isSummarizing, setIsSummarizing] = useState(false);
         const [showSummary, setShowSummary] = useState(false);
         const [middleSummary, setMiddleSummary] = useState(null);
+        const [translatedMiddleText, setTranslatedMiddleText] = useState('');
+        const [translatedEvidenceText, setTranslatedEvidenceText] = useState('');
+        const [isTranslatingMiddle, setIsTranslatingMiddle] = useState(false);
         const [showEvidenceCard, setShowEvidenceCard] = useState(false);
         const [sidebarOpen, setSidebarOpen] = useState(false);
 
         // Fetching local translations for the middle section components based on translation select menu
         const labels = LOCALIZATION_DICTIONARY[middleViewLang] || LOCALIZATION_DICTIONARY.en;
+
+        const clearGeneratedMiddlePanels = () => {
+          setShowSummary(false);
+          setMiddleSummary(null);
+          setShowEvidenceCard(false);
+        };
+
+        const clearMiddleTranslations = () => {
+          setTranslatedMiddleText('');
+          setTranslatedEvidenceText('');
+        };
+
+        const LANGUAGE_NAMES = {
+          en: 'English',
+          ar: 'Arabic',
+          es: 'Spanish',
+          fr: 'French',
+          hi: 'Hindi',
+          ur: 'Urdu'
+        };
 
         // Auto validation check on file context to inspect for valid medical data
         const validateMedicalContent = (text) => {
@@ -657,6 +680,8 @@
         const handleLoadSample = () => {
           setDocs(SAMPLE_FARIS_DOCUMENTS);
           setSelectedDocId('doc-discharge-metropolitan');
+          clearMiddleTranslations();
+          clearGeneratedMiddlePanels();
           setMiddleView('preview');
           setPatientContext({
             name: 'Faris Al-Harbi',
@@ -666,7 +691,7 @@
           });
           setChatHistory(prev => [...prev, {
             sender: 'ai',
-            text: "Loaded Faris Al-Harbi's patient records successfully. Select any source in the Left panel to preview or click any Studio card in the Right panel to analyze details.",
+            text: "Loaded Faris Al-Harbi's patient records successfully. Select any source in the Left panel to preview or click any roadmap section in the Right panel to analyze details.",
             isInternet: false
           }]);
         };
@@ -710,6 +735,8 @@
 
               setDocs(prev => [...prev, newDoc]);
               setSelectedDocId(newDoc.id);
+              clearMiddleTranslations();
+              clearGeneratedMiddlePanels();
               setMiddleView('preview');
             };
             
@@ -753,49 +780,127 @@
           setDocs(updated);
           if (selectedDocId === id) {
             setSelectedDocId(updated[0]?.id || null);
+            setTranslatedMiddleText('');
           }
         };
 
-        // Dynamic API Fetch helper with robust backoff & Google Search grounding integration
-        const fetchGeminiResponse = async (userQuery, systemPrompt, includeInternet) => {
-          if (!apiKey) return null;
-          
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-          
-          // Construct precise payload with system instruction
-          const payload = {
-            contents: [{ parts: [{ text: userQuery }] }]
-          };
+// Dynamic API Fetch helper with robust backoff & Google Search grounding integration
+		const fetchGeminiResponse = async (userQuery, systemPrompt, includeInternet) => {
+		  if (!apiKey) return null;
 
-          if (systemPrompt) {
-            payload.systemInstruction = { parts: [{ text: systemPrompt }] };
-          }
+		  // ⚡ UPDATED: Points to the active Gemini 3.5 Flash production endpoint
+		  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-          // Integrate search grounding tools if checkbox option is marked active
-          if (includeInternet) {
-            payload.tools = [{ "google_search": {} }];
-          }
+		  // Construct precise payload with system instruction
+		  const payload = {
+			contents: [{ parts: [{ text: userQuery }] }]
+		  };
 
-          let delay = 1000;
-          for (let attempt = 0; attempt < 5; attempt++) {
-            try {
-              const response = await fetch(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-              });
-              if (response.ok) {
-                const data = await response.json();
-                return data;
-              }
-            } catch (err) {
-              // Wait and retry - do not print logs to console
-            }
-            await new Promise(resolve => setTimeout(resolve, delay));
-            delay *= 2;
-          }
-          throw new Error("Unable to contact Gemini AI services after multiple attempts.");
+		  if (systemPrompt) {
+			payload.systemInstruction = { parts: [{ text: systemPrompt }] };
+		  }
+
+		  // ⚡ UPDATED: Uses the proper object mapping configuration for Google Search grounding
+		  if (includeInternet) {
+			payload.tools = [{
+              google_search: {}
+            }];
+		  }
+
+		  let delay = 1000;
+		  for (let attempt = 0; attempt < 5; attempt++) {
+			try {
+			  const response = await fetch(url, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload)
+			  });
+  
+			  if (response.ok) {
+				const data = await response.json();
+				return data;
+			  } else {
+				// Read precise error payloads if Google rejects the formatting parameters
+				const errorData = await response.json();
+				console.error(`Gemini 3.5 API Error (Attempt ${attempt + 1}):`, errorData);
+			  }
+			} catch (err) {
+			  console.error(`Network Fetch Connection dropped on attempt ${attempt + 1}:`, err);
+			}
+
+			// Exponential backoff timing controller
+			await new Promise(resolve => setTimeout(resolve, delay));
+			delay *= 2;
+		  }
+		  throw new Error("Unable to contact Gemini AI services after multiple attempts.");
+		};
+
+
+        // Clean web-source formatter: prevents long raw grounding URLs from appearing in chat output.
+        const TRUSTED_MEDICAL_SOURCE_HINTS = [
+          'nhs', 'fda', 'nih', 'medlineplus', 'cdc', 'heart.org', 'american heart association',
+          'mayo clinic', 'cleveland clinic', 'who', 'nice', 'gov', 'edu'
+        ];
+
+        const stripModelSourceDump = (answerText) => {
+          if (!answerText) return '';
+          return answerText
+            .replace(/\n*\*\*Sources Found in Google Search Grounding:\*\*[\s\S]*$/i, '')
+            .replace(/\n*Sources Found in Google Search Grounding:[\s\S]*$/i, '')
+            .replace(/\n*\*\*Sources:\*\*[\s\S]*$/i, '')
+            .replace(/\n*Sources:[\s\S]*$/i, '')
+            .trim();
         };
+
+        const readableSourceName = (chunk) => {
+          const title = (chunk?.web?.title || '').trim();
+          const uri = (chunk?.web?.uri || '').trim();
+
+          // Prefer Gemini's title because Vertex grounding redirect URLs are long and ugly.
+          if (title) {
+            return title
+              .replace(/^https?:\/\//i, '')
+              .replace(/^www\./i, '')
+              .replace(/\/$/, '')
+              .trim();
+          }
+
+          try {
+            const host = new URL(uri).hostname.replace(/^www\./i, '');
+            // Hide Vertex redirect hosts from the user because they are not meaningful source names.
+            if (host.includes('vertexaisearch.cloud.google.com')) return 'Trusted web source';
+            return host;
+          } catch (_) {
+            return 'Trusted web source';
+          }
+        };
+
+        const formatCleanGroundingSources = (groundingChunks) => {
+          if (!Array.isArray(groundingChunks) || groundingChunks.length === 0) return '';
+
+          const unique = [];
+          const seen = new Set();
+
+          groundingChunks.forEach(chunk => {
+            if (!chunk?.web) return;
+            const name = readableSourceName(chunk);
+            const key = name.toLowerCase();
+            if (!name || seen.has(key)) return;
+            seen.add(key);
+            unique.push({ name, key });
+          });
+
+          // Prefer official/high-trust medical sources when they are present.
+          const trusted = unique.filter(src =>
+            TRUSTED_MEDICAL_SOURCE_HINTS.some(hint => src.key.includes(hint))
+          );
+
+          const chosen = (trusted.length ? trusted : unique).slice(0, 4);
+          if (!chosen.length) return '';
+
+          return "\n\nTrusted sources used:\n" + chosen.map(src => `• ${src.name}`).join('\n');
+        };
+
 
         // Dictation Simulation
         const toggleSpeech = () => {
@@ -830,16 +935,31 @@
           if (apiKey) {
             setChatHistory(prev => [...prev, { sender: 'ai', text: "Processing clinical documentation analysis with your Gemini Key...", isInternet: false }]);
             try {
-              const systemPrompt = `You are AZ MedStudio. Answer using this context:\nName: ${patientContext.name}\nAge: ${patientContext.age}\nAllergies: ${patientContext.allergies}\nDocument Context:\n${docs.map(d=>d.content).join('\n')}\nUser query: ${userQuery}. Provide patient-safe, clear explanations.`;
+              const systemPrompt = `You are AZ MedStudio, a patient-safe medical document explainer, not a doctor.
+
+Use this patient/document context first:
+Name: ${patientContext.name}
+Age: ${patientContext.age}
+Allergies: ${patientContext.allergies}
+Document Context:
+${docs.map(d=>d.content).join('\n')}
+
+User query: ${userQuery}
+
+Output rules:
+- Answer in clear English with short headings and bullet points.
+- Separate document-based facts from general web information when web search is enabled.
+- Do not include raw URLs, markdown links, or a long source list inside your answer. The app will append a clean source summary separately.
+- Prefer official or high-trust medical sources for general web information.
+- Do not diagnose, prescribe, or tell the user to start/stop/change medicine.
+- For medicine interactions or unclear instructions, tell the user to confirm with a doctor or pharmacist.`;
               const realResponse = await fetchGeminiResponse(userQuery, systemPrompt, includeInternet);
               
               const rawText = realResponse.candidates?.[0]?.content?.parts?.[0]?.text || "No response received.";
-              const attributions = realResponse.candidates?.[0]?.groundingMetadata?.groundingAttributions;
+              const groundingChunks = realResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
-              let finalMsg = rawText;
-              if (attributions && attributions.length > 0) {
-                finalMsg += "\n\n**Sources Found in Google Search Grounding:**\n" + attributions.map(a => `- [${a.web?.title}](${a.web?.uri})`).join('\n');
-              }
+              // Keep patient answer clean and append only a short, deduplicated source list.
+              let finalMsg = stripModelSourceDump(rawText) + formatCleanGroundingSources(groundingChunks);
 
               setChatHistory(prev => {
                 const updated = [...prev];
@@ -876,11 +996,101 @@
           }
         };
 
-        const handleTranslateMiddleView = (lang) => {
-          setMiddleViewLang(lang);
+        const currentActiveDoc = docs.find(d => d.id === selectedDocId);
+
+        const getRawMiddleWorkspaceText = () => {
+          if (middleView === 'intro') return LOCALIZATION_DICTIONARY.en.workspaceIntroDesc;
+          if (middleView === 'preview' && currentActiveDoc) return currentActiveDoc.content || '';
+          if (middleView === 'uncertainty') {
+            return [
+              LOCALIZATION_DICTIONARY.en.uncertaintyDesc,
+              LOCALIZATION_DICTIONARY.en.uncertaintyItem1,
+              LOCALIZATION_DICTIONARY.en.uncertaintyItem2,
+              LOCALIZATION_DICTIONARY.en.uncertaintyItem3
+            ].join('\n');
+          }
+          if (middleView === 'summary') return LOCALIZATION_DICTIONARY.en.summaryFaris;
+          if (middleView === 'roadmap') {
+            const goal = GOALS_DATABASE.find(g => g.id === selectedGoalId);
+            return goal ? `${goal.title}\n\n${goal.content}\n\nEvidence: ${goal.evidence}` : '';
+          }
+          return '';
         };
 
-        const currentActiveDoc = docs.find(d => d.id === selectedDocId);
+
+        const translateMedicalText = async (text, lang) => {
+          if (!text?.trim() || lang === 'en') return text || '';
+          if (!apiKey) return '';
+          const targetLanguage = LANGUAGE_NAMES[lang] || lang;
+          const translationPrompt = `Translate the following medical workspace text into ${targetLanguage}.
+
+Rules:
+- Preserve medicine names, dosages, lab values, units, dates, and source file names exactly.
+- Keep the same line breaks and simple patient-friendly structure.
+- Do not add new medical advice.
+- Do not remove uncertainty or safety warnings.
+- Return only the translated text.
+
+TEXT:
+${text}`;
+          const translationResult = await fetchGeminiResponse(
+            translationPrompt,
+            'You are a careful medical translation assistant. Translate only; do not diagnose or add clinical recommendations.',
+            false
+          );
+          return stripModelSourceDump(translationResult?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+        };
+
+        const handleTranslateMiddleView = async (lang) => {
+          setMiddleViewLang(lang);
+          clearGeneratedMiddlePanels();
+          clearMiddleTranslations();
+
+          if (lang === 'en') return;
+
+          // Preloaded sample documents already have local translations, so no API call is needed.
+          if (middleView === 'preview' && currentActiveDoc && translateDocContent(currentActiveDoc.id, lang)) {
+            return;
+          }
+
+          // Static panels already use LOCALIZATION_DICTIONARY. Only preview/roadmap dynamic text needs live translation.
+          if (!['preview', 'roadmap'].includes(middleView)) return;
+
+          const selectedGoal = GOALS_DATABASE.find(g => g.id === selectedGoalId);
+          const sourceText = middleView === 'roadmap' ? (selectedGoal?.content || '') : getRawMiddleWorkspaceText();
+          const sourceEvidence = middleView === 'roadmap' ? (selectedGoal?.evidence || '') : '';
+          if (!sourceText.trim() && !sourceEvidence.trim()) return;
+
+          // Without an API key, sample labels still localize, but custom free text cannot be translated.
+          if (!apiKey) return;
+
+          setIsTranslatingMiddle(true);
+          try {
+            const [mainTranslated, evidenceTranslated] = await Promise.all([
+              sourceText ? translateMedicalText(sourceText, lang) : Promise.resolve(''),
+              sourceEvidence ? translateMedicalText(sourceEvidence, lang) : Promise.resolve('')
+            ]);
+            setTranslatedMiddleText(mainTranslated);
+            setTranslatedEvidenceText(evidenceTranslated);
+          } catch (err) {
+            console.error('Middle panel translation failed:', err);
+            setTranslatedMiddleText('Translation failed. Please check your API key and try again.');
+            setTranslatedEvidenceText('');
+          } finally {
+            setIsTranslatingMiddle(false);
+          }
+        };
+
+
+        useEffect(() => {
+          clearGeneratedMiddlePanels();
+          clearMiddleTranslations();
+          if (middleViewLang !== 'en') {
+            // Let React update selected doc/goal first, then translate the newly selected view.
+            setTimeout(() => handleTranslateMiddleView(middleViewLang), 0);
+          }
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [middleView, selectedGoalId, selectedDocId]);
 
         const getMiddleWorkspaceText = () => {
           if (middleView === 'intro') {
@@ -920,8 +1130,9 @@
 
           if (apiKey) {
             try {
-              const summaryPrompt = `Summarize the following clinical text in 2-3 highly understandable patient-friendly bullet points:\n\n${textToSummarize}`;
-              const realSummaryResult = await fetchGeminiResponse(summaryPrompt, "You are a clinical translator.", false);
+              const targetLanguage = LANGUAGE_NAMES[middleViewLang] || 'English';
+              const summaryPrompt = `Summarize the following clinical text in 2-3 highly understandable patient-friendly bullet points. Return the summary in ${targetLanguage}. Preserve medicine names, dosages, lab values, units, and source names exactly:\n\n${textToSummarize}`;
+              const realSummaryResult = await fetchGeminiResponse(summaryPrompt, "You are a careful clinical summary assistant.", false);
               const realSummaryText = realSummaryResult.candidates?.[0]?.content?.parts?.[0]?.text || "No summary was generated.";
               setMiddleSummary(realSummaryText);
             } catch (err) {
@@ -930,7 +1141,7 @@
             setIsSummarizing(false);
           } else {
             setTimeout(() => {
-              setMiddleSummary(`• This section highlights key metrics and action items.\n• Clinical actions should be directly verified with your physician.\n• Avoid changing any dosages without direct professional oversight.`);
+              setMiddleSummary(middleViewLang === 'en' ? `• This section highlights key metrics and action items.\n• Clinical actions should be directly verified with your physician.\n• Avoid changing any dosages without direct professional oversight.` : `${labels.generatedSummaryLabel}: ${labels.safetyDisclaimerText}`);
               setIsSummarizing(false);
             }, 800);
           }
@@ -1246,7 +1457,7 @@
                         return (
                           <div 
                             key={doc.id}
-                            onClick={() => { setSelectedDocId(doc.id); setMiddleView('preview'); setSidebarOpen(false); }}
+                            onClick={() => { setSelectedDocId(doc.id); clearMiddleTranslations(); clearGeneratedMiddlePanels(); setMiddleView('preview'); setSidebarOpen(false); }}
                             className={`p-2.5 rounded-lg border transition cursor-pointer flex justify-between items-center ${
                               doc.isInvalidMedical 
                                 ? 'bg-red-50/70 border-red-400 hover:bg-red-100/50 dark:bg-red-950/20 dark:border-red-900/60'
@@ -1294,7 +1505,10 @@
                     <h2 className="text-md font-bold text-slate-800 dark:text-slate-100">
                       📁 Case Active Workspace
                     </h2>
-                    <p className="text-xs text-slate-500">Currently active panel: {middleView.toUpperCase()}</p>
+                    <p className="text-xs text-slate-500">
+                      Currently active panel: {middleView.toUpperCase()}
+                      {isTranslatingMiddle && <span className="ml-2 text-indigo-600 font-semibold">Translating...</span>}
+                    </p>
                   </div>
                   
                   {/* Desired translation drop down list */}
@@ -1384,12 +1598,14 @@
                           </p>
                           <p>{labels.noMedDataDesc}</p>
                           <div className="mt-2 text-[11px] p-3 bg-white/70 dark:bg-slate-900/50 rounded-lg font-mono whitespace-pre-wrap">
-                            {currentActiveDoc.content}
+                            {isTranslatingMiddle ? `Translating current view to ${LANGUAGE_NAMES[middleViewLang] || middleViewLang}...` : (translatedMiddleText || currentActiveDoc.content)}
                           </div>
                         </div>
                       ) : (
                         <div className="bg-slate-900 text-slate-100 font-mono text-xs p-4 rounded-xl leading-relaxed overflow-y-auto max-h-[350px] whitespace-pre-wrap">
-                          {translateDocContent(currentActiveDoc.id, middleViewLang) || translateRoadmapContent(currentActiveDoc.content)}
+                          {isTranslatingMiddle
+                            ? `Translating current view to ${LANGUAGE_NAMES[middleViewLang] || middleViewLang}...`
+                            : (translatedMiddleText || translateDocContent(currentActiveDoc.id, middleViewLang) || translateRoadmapContent(currentActiveDoc.content))}
                         </div>
                       )}
                     </div>
@@ -1421,7 +1637,7 @@
                           <>
                             <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-2">
                               <div>
-                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Studio Goal View</span>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Selected Health Roadmap Section</span>
                                 <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">{goalItem.title}</h3>
                               </div>
                               <span className="text-lg">{goalItem.icon}</span>
@@ -1429,13 +1645,15 @@
                             
                             {/* Detailed Output Text - translated dynamically */}
                             <div className="bg-slate-50 dark:bg-slate-850/60 p-4 rounded-xl text-xs text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap font-medium">
-                              {translateRoadmapContent(goalItem.content)}
+                              {isTranslatingMiddle
+                                ? `Translating current view to ${LANGUAGE_NAMES[middleViewLang] || middleViewLang}...`
+                                : (translatedMiddleText || translateRoadmapContent(goalItem.content))}
                             </div>
 
                             {/* Linked source highlighting element */}
                             <div className="p-3 bg-indigo-50/40 dark:bg-indigo-950/10 border border-indigo-100 dark:border-indigo-950 rounded-lg text-xs">
                               <span className="font-bold text-indigo-900 dark:text-indigo-400 block mb-1">🔗 {labels.clinicalEvidence}:</span>
-                              <p className="font-mono text-[11px] text-indigo-950 dark:text-indigo-300">{goalItem.evidence}</p>
+                              <p className="font-mono text-[11px] text-indigo-950 dark:text-indigo-300">{isTranslatingMiddle ? `Translating source reference to ${LANGUAGE_NAMES[middleViewLang] || middleViewLang}...` : (translatedEvidenceText || goalItem.evidence)}</p>
                             </div>
                           </>
                         );
@@ -1564,11 +1782,15 @@
                       <strong className="text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
                         <Icons.SourceCheck /> {labels.evidenceTitle}
                       </strong>
-                      <div className="border-l-2 border-indigo-500 pl-3 italic font-mono text-[11px] text-slate-700 dark:text-slate-300">
-                        {labels.evidenceQuote}
+                      <div className="border-l-2 border-indigo-500 pl-3 italic font-mono text-[11px] text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                        {middleView === 'roadmap' && selectedGoalId
+                          ? (translatedEvidenceText || GOALS_DATABASE.find(g => g.id === selectedGoalId)?.evidence || labels.evidenceQuote)
+                          : labels.evidenceQuote}
                       </div>
                       <p className="text-[11px] leading-relaxed">
-                        <strong>{labels.clinicalPrecaution}:</strong> {labels.evidenceTakeaway}
+                        <strong>{labels.clinicalPrecaution}:</strong> {middleView === 'roadmap' && selectedGoalId
+                          ? (translatedMiddleText || GOALS_DATABASE.find(g => g.id === selectedGoalId)?.content || labels.evidenceTakeaway)
+                          : labels.evidenceTakeaway}
                       </p>
                     </div>
                   )}
@@ -1591,9 +1813,9 @@
                   </span>
                 </div>
 
-                {/* NotebookLM Styled Colorful Grid list of 10 goals as beautiful flashcards (Hidden when docs is empty) */}
+                {/* NotebookLM Styled Colorful Grid list of 10 goals as clinical roadmap sections (Hidden when docs is empty) */}
                 <div className="p-4 flex flex-col gap-2.5 overflow-y-auto h-96 border-b border-slate-100 dark:border-slate-850 bg-[#fbfbfd] dark:bg-slate-900/40 shrink-0">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide no-print">Clinical Goal Flash Cards:</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide no-print">Clinical Roadmap Sections:</p>
                   
                   {docs.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-6 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
@@ -1610,6 +1832,8 @@
                             key={goal.id}
                             onClick={() => {
                               setSelectedGoalId(goal.id);
+                              clearMiddleTranslations();
+                              clearGeneratedMiddlePanels();
                               setMiddleView('roadmap');
                             }}
                             className={`p-3 rounded-xl border transition cursor-pointer flex items-start gap-3 bg-gradient-to-r ${goal.color} ${
