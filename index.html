@@ -10,6 +10,8 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- PDF.js for proper in-browser PDF preview and text extraction -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
       /* Smooth theme transitions */
       .theme-transition {
@@ -605,6 +607,181 @@
         }
       ];
 
+
+
+      function FormattedMedicalText({ text }) {
+        const safeText = String(text || '');
+        const lines = safeText.replace(/\r\n/g, '\n').split('\n');
+        const elements = [];
+        let i = 0;
+        let paragraph = [];
+
+        const flushParagraph = () => {
+          if (!paragraph.length) return;
+          elements.push(
+            <div key={`p-${elements.length}`} className="whitespace-pre-wrap leading-relaxed">
+              {paragraph.join('\n')}
+            </div>
+          );
+          paragraph = [];
+        };
+
+        const splitTableRow = (row, expectedCells = null) => {
+          const cells = String(row || '')
+            .replace(/^\s*\|/, '')
+            .replace(/\|\s*$/, '')
+            .split('|')
+            .map(x => x.trim());
+          if (expectedCells && cells.length > expectedCells) {
+            return [...cells.slice(0, expectedCells - 1), cells.slice(expectedCells - 1).join(' / ')];
+          }
+          return cells;
+        };
+
+        const isSeparator = (row) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(String(row || ''));
+
+        try {
+          while (i < lines.length) {
+            const line = lines[i] || '';
+            const next = lines[i + 1] || '';
+            const looksLikeTable = line.includes('|') && isSeparator(next);
+
+            if (looksLikeTable) {
+              flushParagraph();
+              const headers = splitTableRow(line).filter(Boolean);
+              i += 2;
+              const rows = [];
+              while (i < lines.length && lines[i].includes('|') && !/^\s*$/.test(lines[i])) {
+                if (!isSeparator(lines[i])) {
+                  const cells = splitTableRow(lines[i], headers.length);
+                  if (cells.some(Boolean)) rows.push(cells);
+                }
+                i += 1;
+              }
+              if (!headers.length) continue;
+              elements.push(
+                <div key={`t-${elements.length}`} className="overflow-x-auto my-2">
+                  <table className="min-w-full text-[11px] border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden bg-white dark:bg-slate-900">
+                    <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200">
+                      <tr>{headers.map((h, idx) => <th key={idx} className="border border-slate-200 dark:border-slate-700 px-2 py-2 text-left font-bold">{h}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, rIdx) => (
+                        <tr key={rIdx} className="align-top">
+                          {headers.map((_, cIdx) => <td key={cIdx} className="border border-slate-200 dark:border-slate-700 px-2 py-2 whitespace-pre-wrap">{row[cIdx] || ''}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+              continue;
+            }
+
+            paragraph.push(line);
+            i += 1;
+          }
+          flushParagraph();
+          return <div className="flex flex-col gap-3">{elements}</div>;
+        } catch (err) {
+          console.error('FormattedMedicalText render failed:', err);
+          return <pre className="whitespace-pre-wrap leading-relaxed">{safeText}</pre>;
+        }
+      }
+
+      function PdfCanvasPreview({ fileUrl, fileName }) {
+        const containerRef = React.useRef(null);
+        const [status, setStatus] = React.useState('Rendering PDF preview...');
+
+        React.useEffect(() => {
+          let cancelled = false;
+          const renderPdf = async () => {
+            if (!fileUrl || !window.pdfjsLib || !containerRef.current) {
+              setStatus('PDF preview is unavailable in this browser.');
+              return;
+            }
+            try {
+              window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+              containerRef.current.innerHTML = '';
+              setStatus('Rendering PDF preview...');
+              const pdf = await window.pdfjsLib.getDocument(fileUrl).promise;
+              const maxPages = Math.min(pdf.numPages, 8);
+
+              for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+                if (cancelled) return;
+                const page = await pdf.getPage(pageNum);
+                const viewport = page.getViewport({ scale: 1.55 });
+                const pageWrap = document.createElement('div');
+                pageWrap.className = 'mb-4 rounded-xl overflow-hidden border border-slate-200 bg-white shadow-sm';
+
+                const label = document.createElement('div');
+                label.className = 'px-3 py-2 text-[10px] font-bold text-slate-500 bg-slate-50 border-b border-slate-100';
+                label.textContent = `${fileName || 'PDF'} — Page ${pageNum}`;
+
+                const canvas = document.createElement('canvas');
+                const outputScale = window.devicePixelRatio || 1;
+                canvas.width = Math.floor(viewport.width * outputScale);
+                canvas.height = Math.floor(viewport.height * outputScale);
+                canvas.style.width = '100%';
+                canvas.style.height = 'auto';
+                const ctx = canvas.getContext('2d');
+                ctx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+
+                pageWrap.appendChild(label);
+                pageWrap.appendChild(canvas);
+                containerRef.current.appendChild(pageWrap);
+                await page.render({ canvasContext: ctx, viewport }).promise;
+              }
+              setStatus(pdf.numPages > maxPages ? `Rendered first ${maxPages} of ${pdf.numPages} pages.` : '');
+            } catch (err) {
+              console.error('PDF render failed:', err);
+              setStatus('Could not render this PDF. Use the open/download option or try another browser.');
+            }
+          };
+          renderPdf();
+          return () => {
+            cancelled = true;
+            if (containerRef.current) containerRef.current.innerHTML = '';
+          };
+        }, [fileUrl, fileName]);
+
+        return (
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-y-auto bg-slate-100 dark:bg-slate-950 mb-3 max-h-[680px] p-3">
+            {status && <p className="text-[11px] text-slate-500 mb-3 font-semibold">{status}</p>}
+            <div ref={containerRef}></div>
+          </div>
+        );
+      }
+
+
+      class AppErrorBoundary extends React.Component {
+        constructor(props) {
+          super(props);
+          this.state = { hasError: false, message: '' };
+        }
+        static getDerivedStateFromError(error) {
+          return { hasError: true, message: error?.message || 'Unknown UI error' };
+        }
+        componentDidCatch(error, info) {
+          console.error('AZ MedStudio UI crash prevented:', error, info);
+        }
+        render() {
+          if (this.state.hasError) {
+            return (
+              <div className="h-screen flex items-center justify-center bg-slate-50 text-slate-800 p-6">
+                <div className="max-w-xl bg-white border border-rose-200 rounded-2xl p-6 shadow-sm">
+                  <h1 className="text-lg font-bold text-rose-700 mb-2">Something went wrong in this panel</h1>
+                  <p className="text-sm text-slate-600 mb-3">The app caught a UI error instead of crashing the whole page.</p>
+                  <pre className="text-xs bg-rose-50 border border-rose-100 rounded-lg p-3 overflow-auto">{this.state.message}</pre>
+                  <button onClick={() => window.location.reload()} className="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold">Reload app</button>
+                </div>
+              </div>
+            );
+          }
+          return this.props.children;
+        }
+      }
+
       function App() {
         const [docs, setDocs] = useState([]); 
         const [selectedDocId, setSelectedDocId] = useState(null);
@@ -616,6 +793,7 @@
         const [middleViewLang, setMiddleViewLang] = useState('en'); 
         const [selectedGoalId, setSelectedGoalId] = useState(null);
         const [manualContext, setManualContext] = useState(false);
+        const [isSampleCase, setIsSampleCase] = useState(false);
 
         const [patientContext, setPatientContext] = useState({
           name: 'N/A',
@@ -627,6 +805,9 @@
         // Chat parameters
         const [chatQuery, setChatQuery] = useState('');
         const [includeInternet, setIncludeInternet] = useState(true);
+        const [useRoadmapInternet, setUseRoadmapInternet] = useState(true);
+        const [cacheEnabled, setCacheEnabled] = useState(true);
+        const [cacheStatus, setCacheStatus] = useState('');
         const [chatHistory, setChatHistory] = useState([
           { sender: 'ai', text: "Welcome to AZ MedStudio. Upload medical documents, type your symptoms below, or load our sample case study to get started.", isInternet: false }
         ]);
@@ -640,6 +821,10 @@
         const [isTranslatingMiddle, setIsTranslatingMiddle] = useState(false);
         const [showEvidenceCard, setShowEvidenceCard] = useState(false);
         const [sidebarOpen, setSidebarOpen] = useState(false);
+        const [enhancedGoalContent, setEnhancedGoalContent] = useState({});
+        const [enhancingGoalId, setEnhancingGoalId] = useState(null);
+        const [caseUnderstanding, setCaseUnderstanding] = useState(null);
+        const [isBuildingCaseUnderstanding, setIsBuildingCaseUnderstanding] = useState(false);
 
         // Fetching local translations for the middle section components based on translation select menu
         const labels = LOCALIZATION_DICTIONARY[middleViewLang] || LOCALIZATION_DICTIONARY.en;
@@ -655,6 +840,13 @@
           setTranslatedEvidenceText('');
         };
 
+        const clearUploadedAiEnhancements = () => {
+          setEnhancedGoalContent({});
+          setEnhancingGoalId(null);
+          setCaseUnderstanding(null);
+          setIsBuildingCaseUnderstanding(false);
+        };
+
         const LANGUAGE_NAMES = {
           en: 'English',
           ar: 'Arabic',
@@ -664,13 +856,75 @@
           ur: 'Urdu'
         };
 
+        const stableHash = (input) => {
+          const str = String(input || '');
+          let hash = 5381;
+          for (let i = 0; i < str.length; i++) {
+            hash = ((hash << 5) + hash) + str.charCodeAt(i);
+            hash = hash >>> 0;
+          }
+          return hash.toString(36);
+        };
+
+        const getDocsFingerprint = () => {
+          const signature = docs.map(d => [
+            d.name,
+            d.type,
+            d.fileKind,
+            d.mimeType,
+            (d.content || '').slice(0, 4000),
+            (d.base64Data || '').length
+          ].join('::')).join('||');
+          return stableHash(signature || 'empty-docs');
+        };
+
+        const cacheGet = (key) => {
+          if (!cacheEnabled) return null;
+          try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            const maxAgeMs = 1000 * 60 * 60 * 24 * 7;
+            if (!parsed?.createdAt || Date.now() - parsed.createdAt > maxAgeMs) {
+              localStorage.removeItem(key);
+              return null;
+            }
+            return parsed.value;
+          } catch (err) {
+            console.warn('Cache read failed:', err);
+            return null;
+          }
+        };
+
+        const cacheSet = (key, value) => {
+          if (!cacheEnabled) return;
+          try {
+            localStorage.setItem(key, JSON.stringify({ createdAt: Date.now(), value }));
+          } catch (err) {
+            console.warn('Cache write failed:', err);
+          }
+        };
+
+        const clearAzMedCache = () => {
+          try {
+            Object.keys(localStorage).forEach(k => {
+              if (k.startsWith('az-medstudio-cache:')) localStorage.removeItem(k);
+            });
+            setCacheStatus('Cache cleared. New roadmap clicks will call Gemini again when needed.');
+          } catch (_) {
+            setCacheStatus('Could not clear cache in this browser.');
+          }
+        };
+
+
         // Auto validation check on file context to inspect for valid medical data
         const validateMedicalContent = (text) => {
           const medicalKeywords = [
             'mg', 'blood', 'heart', 'patient', 'clinic', 'hospital', 'rx', 'doctor',
             'tablet', 'lab', 'cholesterol', 'hypertension', 'pain', 'allergic',
             'allergy', 'medication', 'diagnose', 'treatment', 'capsule', 'cardiac',
-            'lipid', 'discharge', 'prescribe', 'dose', 'hba1c', 'chol', 'ldl', 'hdl', 'bp'
+            'lipid', 'discharge', 'prescribe', 'dose', 'hba1c', 'chol', 'ldl', 'hdl', 'bp',
+            'ultrasound', 'sonography', 'usg', 'radiology', 'impression', 'findings', 'gallbladder', 'kidney', 'liver', 'uterus', 'ovary', 'abdomen'
           ];
           const lowerText = text.toLowerCase();
           return medicalKeywords.some(keyword => lowerText.includes(keyword));
@@ -678,10 +932,12 @@
 
         // Load Sample Case Study manually
         const handleLoadSample = () => {
-          setDocs(SAMPLE_FARIS_DOCUMENTS);
+          setIsSampleCase(true);
+          setDocs(SAMPLE_FARIS_DOCUMENTS.map(doc => ({ ...doc, sourceMode: 'sample', fileKind: doc.type.includes('Image') ? 'image-sample' : 'text' })));
           setSelectedDocId('doc-discharge-metropolitan');
           clearMiddleTranslations();
           clearGeneratedMiddlePanels();
+          clearUploadedAiEnhancements();
           setMiddleView('preview');
           setPatientContext({
             name: 'Faris Al-Harbi',
@@ -696,57 +952,254 @@
           }]);
         };
 
-        // Handle System Native File upload (TXT, PDF, Word, Images) with medical content validation
-        const handleNativeFileUpload = (e) => {
-          const files = Array.from(e.target.files);
+        // PDF/image/text upload with real preview support. PDFs are rendered from a Blob URL and text is extracted with PDF.js when possible.
+        const extractPdfText = async (file) => {
+          if (!window.pdfjsLib) return '';
+          try {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const chunks = [];
+            const maxPages = Math.min(pdf.numPages, 12);
+            for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+              const page = await pdf.getPage(pageNum);
+              const textContent = await page.getTextContent();
+              const pageText = textContent.items.map(item => item.str).join(' ');
+              chunks.push(`--- Page ${pageNum} ---\n${pageText}`);
+            }
+            return chunks.join('\n\n').trim();
+          } catch (err) {
+            console.error('PDF text extraction failed:', err);
+            return '';
+          }
+        };
+
+        const readFileAsText = (file) => new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve(event.target.result || '');
+          reader.onerror = () => resolve('');
+          reader.readAsText(file);
+        });
+
+        const readFileAsDataUrl = (file) => new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve(event.target.result || '');
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(file);
+        });
+
+        const dataUrlToBase64 = (dataUrl) => {
+          const parts = String(dataUrl || '').split(',');
+          return parts.length > 1 ? parts[1] : '';
+        };
+
+
+        // Conservative patient profile extraction across PDFs, images with extracted text, notes, and Gemini case memory.
+        // Important: offline extraction is NOT an LLM. It must never guess profile fields from random headers/dates.
+        const normalizeProfileText = (value) => String(value || '')
+          .replace(/\r/g, '\n')
+          .replace(/\t/g, ' ')
+          .replace(/[ ]{2,}/g, ' ');
+
+        const looksLikeDateOrHeader = (value) => {
+          const v = String(value || '').trim();
+          if (!v) return true;
+          if (/\b(exam|report|printed|collected|registered|date|time|page|hospital|clinic|doctor|consultant|file|mrn|id|invoice|result)\b/i.test(v)) return true;
+          const dateCount = (v.match(/\b\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4}\b/g) || []).length;
+          if (dateCount >= 1) return true;
+          const digitCount = (v.match(/\d/g) || []).length;
+          const letterCount = (v.match(/[A-Za-z\u0600-\u06FF]/g) || []).length;
+          if (digitCount > letterCount) return true;
+          return false;
+        };
+
+        const isValidPatientName = (value) => {
+          const v = String(value || '').trim();
+          if (v.length < 2 || v.length > 80) return false;
+          if (looksLikeDateOrHeader(v)) return false;
+          if (!/[A-Za-z\u0600-\u06FF]/.test(v)) return false;
+          if (/\b(male|female|sex|gender|age|allerg|nkda|exam|report|date|time|years?|yrs?)\b/i.test(v)) return false;
+          const words = v.split(/\s+/).filter(Boolean);
+          if (words.length > 7) return false;
+          return true;
+        };
+
+        const cleanProfileValue = (value, field = 'generic') => {
+          if (!value) return '';
+          let v = String(value)
+            .replace(/\s+/g, ' ')
+            .replace(/^[-:|\s]+/, '')
+            .replace(/[|;,]+$/g, '')
+            .trim();
+
+          // Stop at the next known label if PDF.js merged several fields into one line.
+          v = v.split(/\b(?:age|sex|gender|dob|date of birth|mrn|id|file no|allerg(?:y|ies)|consultant|doctor|date|mobile|phone|exam|report|visit)\b\s*[:\-]?/i)[0].trim();
+
+          if (field === 'name') return isValidPatientName(v) ? v : '';
+          if (field === 'allergies') {
+            if (/\b(no\s+known\s+(?:drug\s+)?allerg(?:y|ies)|nkda|nil|none|no)\b/i.test(v)) return 'No Known Drug Allergies (NKDA)';
+            if (!v || looksLikeDateOrHeader(v)) return '';
+            if (/\b(age|sex|gender|exam|report|date|time|patient name)\b/i.test(v)) return '';
+            return v.length <= 120 ? v : '';
+          }
+          return v;
+        };
+
+        const getLabelValue = (text, labels, field = 'generic') => {
+          const normalized = normalizeProfileText(text);
+          const lines = normalized.split('\n').map(l => l.trim()).filter(Boolean);
+          const labelPattern = labels.map(l => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+
+          // 1) Same-line labels: "Patient Name: John Smith", "Sex / Age: Male / 40" etc.
+          const sameLine = new RegExp(`\\b(?:${labelPattern})\\b\\s*[:\\-]?\\s*([^\\n|]{1,120})`, 'i');
+          for (const line of lines) {
+            const m = line.match(sameLine);
+            if (m && m[1]) {
+              const cleaned = cleanProfileValue(m[1], field);
+              if (cleaned) return cleaned;
+            }
+          }
+
+          // 2) Two-line labels: label on one line, value on the next line.
+          const labelOnly = new RegExp(`^\\s*(?:${labelPattern})\\s*[:\\-]?\\s*$`, 'i');
+          for (let i = 0; i < lines.length - 1; i++) {
+            if (labelOnly.test(lines[i])) {
+              const cleaned = cleanProfileValue(lines[i + 1], field);
+              if (cleaned) return cleaned;
+            }
+          }
+          return '';
+        };
+
+        const extractPatientProfileFromText = (text) => {
+          const normalized = normalizeProfileText(text);
+
+          const name = getLabelValue(normalized, [
+            'patient name', 'name of patient', 'patient\'s name', 'pt name', 'name'
+          ], 'name');
+
+          const age = (() => {
+            const m = normalized.match(/\bage\s*(?:\/\s*sex)?\s*[:\-]?\s*(\d{1,3})(?:\s*(?:years?|yrs?|y\/o))?/i)
+              || normalized.match(/\b(\d{1,3})\s*(?:years?|yrs?|y\/o)\b/i);
+            return m ? m[1] : '';
+          })();
+
+          const genderRaw = (() => {
+            const m = normalized.match(/(?:gender|sex)\s*[:\-]?\s*(male|female|m|f)\b/i)
+              || normalized.match(/(?:age\/sex|age\s*&\s*sex)\s*[:\-]?\s*\d{1,3}\s*\/?\s*(male|female|m|f)\b/i)
+              || normalized.match(/\b(male|female)\b/i);
+            return m ? m[1] : '';
+          })();
+          const gender = genderRaw
+            ? (genderRaw.toLowerCase() === 'm' ? 'Male' : genderRaw.toLowerCase() === 'f' ? 'Female' : genderRaw.charAt(0).toUpperCase() + genderRaw.slice(1).toLowerCase())
+            : '';
+
+          const allergies = (() => {
+            if (/\b(no\s+known\s+(?:drug\s+)?allerg(?:y|ies)|nkda)\b/i.test(normalized)) return 'No Known Drug Allergies (NKDA)';
+            return getLabelValue(normalized, [
+              'known allergies', 'drug allergies', 'drug allergy', 'allergies', 'allergy', 'allergic to'
+            ], 'allergies');
+          })();
+
+          return { name, age, gender, allergies };
+        };
+
+        const mergePatientProfile = (profile, force = false) => {
+          if (!profile) return;
+          setPatientContext(prev => ({
+            name: (force || prev.name === 'N/A') && profile.name ? profile.name : prev.name,
+            age: (force || prev.age === 'N/A') && profile.age ? profile.age : prev.age,
+            gender: (force || prev.gender === 'N/A') && profile.gender ? profile.gender : prev.gender,
+            allergies: (force || prev.allergies === 'N/A') && profile.allergies ? profile.allergies : prev.allergies
+          }));
+        };
+
+        const refreshPatientProfileFromDocs = (docsList = docs, force = false) => {
+          const combinedText = (docsList || []).map(d => `SOURCE: ${d.name}\n${d.content || ''}`).join('\n\n');
+          mergePatientProfile(extractPatientProfileFromText(combinedText), force);
+        };
+
+        const resetToUploadedCase = () => {
+          if (isSampleCase) setDocs([]);
+          setIsSampleCase(false);
+          setSelectedGoalId(null);
+          clearMiddleTranslations();
+          clearGeneratedMiddlePanels();
+          clearUploadedAiEnhancements();
+        };
+
+        const handleNativeFileUpload = async (e) => {
+          const files = Array.from(e.target.files || []);
           if (!files.length) return;
+          resetToUploadedCase();
 
-          files.forEach((file, index) => {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-              const fileContent = event.target.result || "Raw non-text/binary document metrics extracted successfully.";
-              const containsMedicalData = validateMedicalContent(fileContent.toString());
+          for (const [index, file] of files.entries()) {
+            const mime = file.type || '';
+            const lowerName = file.name.toLowerCase();
+            const isPdf = mime === 'application/pdf' || lowerName.endsWith('.pdf');
+            const isImage = mime.startsWith('image/') || /\.(png|jpg|jpeg|webp|gif)$/i.test(lowerName);
+            const previewUrl = URL.createObjectURL(file);
+            const dataUrl = (isPdf || isImage) ? await readFileAsDataUrl(file) : '';
+            const base64Data = dataUrlToBase64(dataUrl);
 
-              const newDoc = {
-                id: `uploaded-${Date.now()}-${index}`,
-                name: file.name,
-                type: file.type || "Clinical File",
-                lang: "English (Auto)",
-                confidence: containsMedicalData ? "High" : "Low",
-                status: containsMedicalData ? "Extracted" : labels.noMedData,
-                isInvalidMedical: !containsMedicalData,
-                content: typeof fileContent === 'string' ? fileContent : `[Binary/Image/PDF parsed] Name: ${file.name}\nSize: ${file.size} bytes`
-              };
+            let extractedText = '';
+            let fileKind = 'text';
+            let status = 'Extracted';
+            let confidence = 'High';
 
-              // Auto-Extract Patient Details dynamically if not overridden manually
-              if (!manualContext && containsMedicalData) {
-                const nameMatch = fileContent.toString().match(/PATIENT:\s*([^\n|]+)/i);
-                const ageMatch = fileContent.toString().match(/AGE:\s*(\d+)/i);
-                const genderMatch = fileContent.toString().match(/GENDER|SEX:\s*([^\n|]+)/i);
-                const allergyMatch = fileContent.toString().match(/ALLERGIES:\s*([^\n|]+)/i);
-
-                setPatientContext(prev => ({
-                  name: nameMatch ? nameMatch[1].trim() : (prev.name !== 'N/A' ? prev.name : 'Detected Patient'),
-                  age: ageMatch ? ageMatch[1].trim() : (prev.age !== 'N/A' ? prev.age : '61'),
-                  gender: genderMatch ? genderMatch[1].trim() : (prev.gender !== 'N/A' ? prev.gender : 'Male'),
-                  allergies: allergyMatch ? allergyMatch[1].trim() : (prev.allergies !== 'N/A' ? prev.allergies : 'NKDA (Assumed)')
-                }));
+            if (isPdf) {
+              fileKind = 'pdf';
+              extractedText = await extractPdfText(file);
+              if (!extractedText) {
+                status = 'Preview only - scanned PDF or text extraction failed';
+                confidence = 'Low';
+                extractedText = `[PDF preview available]\nFile: ${file.name}\nText extraction did not find readable text. For scanned PDFs, connect OCR on the backend.`;
               }
+            } else if (isImage) {
+              fileKind = 'image';
+              status = 'Preview only - OCR not connected';
+              confidence = 'Low';
+              extractedText = `[Image preview available]\nFile: ${file.name}\nSize: ${file.size} bytes\nOCR is not connected in this frontend-only prototype. Add backend OCR/vision extraction for medicine labels and handwritten notes.`;
+            } else {
+              extractedText = await readFileAsText(file);
+            }
 
-              setDocs(prev => [...prev, newDoc]);
-              setSelectedDocId(newDoc.id);
-              clearMiddleTranslations();
-              clearGeneratedMiddlePanels();
-              setMiddleView('preview');
+            const containsMedicalData = validateMedicalContent(extractedText);
+            const newDoc = {
+              id: `uploaded-${Date.now()}-${index}`,
+              name: file.name,
+              type: isPdf ? 'PDF Document' : isImage ? 'Image Document' : (file.type || 'Clinical File'),
+              lang: 'Auto-detected',
+              confidence: containsMedicalData ? confidence : 'Low',
+              status: containsMedicalData ? status : ((isPdf || isImage) ? status : labels.noMedData),
+              isInvalidMedical: !containsMedicalData && !isPdf && !isImage,
+              content: extractedText,
+              previewUrl,
+              dataUrl,
+              base64Data,
+              mimeType: mime || (isPdf ? 'application/pdf' : isImage ? 'image/*' : 'text/plain'),
+              fileKind,
+              sourceMode: 'uploaded'
             };
-            
-            reader.readAsText(file);
-          });
+
+            if (!manualContext && containsMedicalData) {
+              // Robust profile extraction from this uploaded source.
+              // The Gemini case-memory step will refine it again from all PDFs/images when available.
+              mergePatientProfile(extractPatientProfileFromText(extractedText), false);
+            }
+
+            setDocs(prev => [...prev, newDoc]);
+            setSelectedDocId(newDoc.id);
+            setMiddleView('preview');
+          }
+
+          e.target.value = '';
         };
 
         // Handle typing custom clinical notes with validation check
         const handleSaveOnTheGoNote = () => {
           if (!notesText.trim()) return;
+          resetToUploadedCase();
           
           const containsMedicalData = validateMedicalContent(notesText);
 
@@ -758,13 +1211,15 @@
             confidence: containsMedicalData ? "High" : "Low",
             status: containsMedicalData ? "Extracted" : labels.noMedData,
             isInvalidMedical: !containsMedicalData,
-            content: `ON-THE-GO CLINICAL DIARY:\n${notesText}`
+            content: `ON-THE-GO CLINICAL DIARY:\n${notesText}`,
+            fileKind: 'text',
+            sourceMode: 'uploaded'
           };
 
           if (!manualContext && containsMedicalData) {
             setPatientContext(prev => ({
               ...prev,
-              name: prev.name === 'N/A' ? 'Self Logged Patient' : prev.name
+              name: prev.name === 'N/A' ? 'Patient from uploaded notes' : prev.name
             }));
           }
 
@@ -778,6 +1233,7 @@
           e.stopPropagation();
           const updated = docs.filter(d => d.id !== id);
           setDocs(updated);
+          clearUploadedAiEnhancements();
           if (selectedDocId === id) {
             setSelectedDocId(updated[0]?.id || null);
             setTranslatedMiddleText('');
@@ -979,17 +1435,19 @@ Output rules:
               let answer = "";
               const queryLower = userQuery.toLowerCase();
 
-              if (queryLower.includes('cholesterol') || queryLower.includes('lipid') || queryLower.includes('ldl')) {
+              if (isSampleCase && (queryLower.includes('cholesterol') || queryLower.includes('lipid') || queryLower.includes('ldl'))) {
                 answer = "In Faris_Blood_LipidReport.pdf, your Total Cholesterol is 240 mg/dL (HIGH) and LDL bad cholesterol is 155 mg/dL (HIGH). The report explicitly mentions that these blood draws are suspected to be non-fasting.";
-                if (includeInternet) {
-                  answer += "\n\n[Clinical Web Context]: General cardiology guidelines advise confirming a fasting lipid profile to precisely verify lipid thresholds.";
-                }
-              } else if (queryLower.includes('amlodipine') || queryLower.includes('blood pressure') || queryLower.includes('bp')) {
+              } else if (isSampleCase && (queryLower.includes('amlodipine') || queryLower.includes('blood pressure') || queryLower.includes('bp'))) {
                 answer = "Your Metropolitan Discharge Summary states that Amlodipine 5mg once daily in the morning has been restarted to manage mild hypertension.";
-              } else if (queryLower.includes('ibuprofen') || queryLower.includes('painkiller') || queryLower.includes('nsaid')) {
+              } else if (isSampleCase && (queryLower.includes('ibuprofen') || queryLower.includes('painkiller') || queryLower.includes('nsaid'))) {
                 answer = "The cardiology script lists a renal precaution to strictly avoid NSAIDs like Ibuprofen to preserve kidney health.";
               } else {
-                answer = "I've searched your active document sources. If this relates to your cardiac fatigue or cholesterol levels, please consult your healthcare team during your 4-week clinic visit.";
+                const corpus = getDocumentCorpus();
+                const tokens = queryLower.split(/\s+/).filter(Boolean);
+                const matchingLines = corpus.split(/\n/).filter(line => tokens.some(token => token.length > 2 && line.toLowerCase().includes(token))).slice(0, 5).join('\n');
+                answer = matchingLines
+                  ? `I found these matching lines in your uploaded documents only:\n${matchingLines}\n\nI did not use the Faris sample case. Add a Gemini API key for deeper document-specific synthesis.`
+                  : "I searched only your currently uploaded documents. I did not use the Faris sample case. Add a Gemini API key for deeper document-specific analysis.";
               }
               setChatHistory(prev => [...prev, { sender: 'ai', text: answer, isInternet: includeInternet }]);
             }, 800);
@@ -997,6 +1455,477 @@ Output rules:
         };
 
         const currentActiveDoc = docs.find(d => d.id === selectedDocId);
+
+        const getDocumentCorpus = () => docs.map(d => `${d.name}\n${d.content || ''}`).join('\n\n');
+
+        const makeSnippet = (pattern, fallback = '') => {
+          const corpus = getDocumentCorpus();
+          const match = corpus.match(pattern);
+          return match ? match[0].slice(0, 500) : fallback;
+        };
+
+        const extractLinesByRegex = (regex, limit = 12) => {
+          const corpus = getDocumentCorpus();
+          return corpus.split(/\n|;/).map(line => line.trim()).filter(line => line && regex.test(line)).slice(0, limit);
+        };
+
+
+        const buildLocalCaseUnderstanding = () => {
+          const corpus = getDocumentCorpus();
+          return {
+            mode: 'local',
+            sourceNames: docs.map(d => d.name),
+            diagnoses: extractLinesByRegex(/\b(diagnosis|diagnosed|impression|assessment|condition|findings|ultrasound|sonography|usg|radiology|hypertension|diabetes|hyperlipidemia|cardiac|infection|fracture|asthma|renal|kidney|liver|thyroid|gallbladder|abdomen|uterus|ovary)\b/i, 20),
+            medicines: extractLinesByRegex(/\b(rx|medicine|medication|drug|tablet|tab\.?|cap\.?|capsule|syrup|drops|cream|ointment|injection|inj\.?|mg|mcg|g\b|ml|iu|po|bid|tid|qid|qd|od|qhs|hs|pc|ac|prn|sos|daily|twice|thrice|morning|night|amlodipine|metformin|atorvastatin|rosuvastatin|paracetamol|acetaminophen|ibuprofen|aspirin|insulin|omeprazole|pantoprazole|azithromycin|amoxicillin|cetirizine|levothyroxine)\b/i, 50),
+            labs: extractLinesByRegex(/\b(cholesterol|ldl|hdl|triglycerides|hba1c|glucose|creatinine|egfr|hemoglobin|wbc|rbc|platelet|sodium|potassium|tsh|alt|ast|bilirubin|uric acid|high|low|mg\/dl|mmol\/l|%|ultrasound|sonography|usg|radiology|impression|findings|liver|kidney|gallbladder|abdomen|uterus|ovary|prostate)\b/i, 40),
+            warnings: extractLinesByRegex(/\b(allergy|allergic|avoid|contraindication|warning|renal|kidney|liver|pregnan|bleeding|chest pain|shortness|emergency|urgent|nsaid|ibuprofen|grapefruit)\b/i, 20),
+            followUps: extractLinesByRegex(/\b(follow[- ]?up|review|appointment|repeat|return|clinic|weeks|days|months)\b/i, 12),
+            rawPreview: corpus.slice(0, 6000)
+          };
+        };
+
+        const buildCaseUnderstandingPrompt = () => `You are AZ MedStudio's DOCUMENT READING layer.
+
+Task: read ALL uploaded medical documents/images/PDFs like a clinician's assistant would read a complete patient file. Build a compact "case memory" that later roadmap sections can query. This is NOT the final patient answer.
+
+Critical extraction rules:
+- Extract as much useful information as possible from every attached document and the browser-extracted text.
+- Use document facts only. Do not use internet here. Do not educate here.
+- Keep source references beside facts, for example: [Blood_Report.pdf p2] or [Prescription_Image.png].
+- If a medicine name/dose/instruction is blurry or uncertain, mark it as UNCLEAR instead of guessing.
+- MEDICINE EXTRACTION RULES:
+  * Extract the full medicine name exactly as written in the document, including brand/form text and strength when shown, for example "Tab Augmentin 1g", not just "Augmentin".
+  * Do not shorten medicine names.
+  * Do not guess unclear names.
+  * Do not merge multiple medicines into one row.
+  * Each medicine must be one separate JSON object in the MEDICATIONS_JSON section.
+  * If the name is unclear, write "Unclear medicine name" and mark confidence as low.
+  * Instructions must come from the document only. Internet/general knowledge may NOT be used in this extraction step.
+- Preserve exact medicine names, strengths, lab values, ultrasound/radiology findings, units, dates, doctor instructions, warnings, allergies, and follow-up dates.
+- Treat ultrasound, sonography, USG, radiology, and imaging reports as test findings even if they are not blood labs.
+- Create a coherent patient story in your own internal summary, but keep it concise.
+
+Return this exact structure in plain text:
+PATIENT CASE MEMORY
+1) Patient/context:
+- Name:
+- Age/sex:
+- Allergies:
+- Existing conditions:
+
+2) Clinical story in 5-8 lines:
+- Explain what seems to have happened across the documents.
+
+3) Diagnoses/report findings:
+- Finding | Plain meaning | Source | Confidence
+
+4) Medicines:
+Medicine | Strength | Document instruction | Likely purpose from document context only | Source | Confidence
+
+4B) MEDICATIONS_JSON:
+Return a valid JSON array only for medicines, with one object per medicine:
+[
+  {
+    "medicine_name_exact": "full medicine name exactly as written, or Unclear medicine name",
+    "strength": "as written, or empty",
+    "dose": "as written, or empty",
+    "route": "as written, or empty",
+    "frequency": "as written, or empty",
+    "timing": "as written, or empty",
+    "duration": "as written, or empty",
+    "original_instruction": "exact instruction text from document",
+    "source": "document/page if known",
+    "confidence": "high|medium|low",
+    "needs_verification": true
+  }
+]
+If there are no clearly readable medicines, return [].
+
+5) Lab / imaging / test results:
+Test or imaging report | Result / finding | Reference range if present | Status / impression | Source | Confidence
+
+6) Safety/warnings:
+- Warning | Why it matters | Source | Confidence
+
+7) Follow-up/actions mentioned by clinician:
+- Action | Timing | Source
+
+8) Unclear items needing verification:
+- Item | Why unclear | Source
+
+Browser-extracted text from all sources:
+${getDocumentCorpus().slice(0, 18000)}`;
+
+        const fetchCaseUnderstanding = async () => {
+          if (!apiKey) return buildLocalCaseUnderstanding();
+          if (caseUnderstanding?.mode === 'gemini' && caseUnderstanding?.fingerprint === getDocsFingerprint()) return caseUnderstanding;
+          const cacheKey = `az-medstudio-cache:v2-meds:case:${getDocsFingerprint()}`;
+          const cachedCase = cacheGet(cacheKey);
+          if (cachedCase) {
+            setCaseUnderstanding(cachedCase);
+            if (!manualContext) mergePatientProfile(extractPatientProfileFromText(cachedCase.text || ''), false);
+            setCacheStatus('Loaded case understanding from cache.');
+            return cachedCase;
+          }
+          setIsBuildingCaseUnderstanding(true);
+          try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+            const parts = [{ text: buildCaseUnderstandingPrompt() }];
+            docs.filter(d => d.sourceMode === 'uploaded' && d.base64Data && (d.fileKind === 'pdf' || d.fileKind === 'image'))
+              .filter(d => (d.base64Data || '').length < 7000000)
+              .slice(0, 4)
+              .forEach(d => {
+                parts.push({ text: `Attached source file for extraction: ${d.name} (${d.mimeType || d.type})` });
+                parts.push({ inline_data: { mime_type: d.mimeType || (d.fileKind === 'pdf' ? 'application/pdf' : 'image/jpeg'), data: d.base64Data } });
+              });
+            const payload = {
+              contents: [{ parts }],
+              systemInstruction: { parts: [{ text: 'Extract a complete but compact patient case memory from the documents. For medicines, extract one medicine per row and one medicine per JSON object; preserve the exact full medicine name as written; do not shorten, guess, or merge medicines. If unclear, write Unclear medicine name and confidence low. Do not invent. Mark uncertainty clearly. Do not provide patient advice in this extraction step.' }] },
+              generationConfig: { temperature: 0.1 }
+            };
+            const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!response.ok) throw new Error('Case extraction failed');
+            const data = await response.json();
+            const responseText = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('\n').trim() || '';
+            const built = { mode: 'gemini', text: responseText, local: buildLocalCaseUnderstanding(), sourceNames: docs.map(d => d.name), fingerprint: getDocsFingerprint() };
+            cacheSet(cacheKey, built);
+            if (!manualContext) mergePatientProfile(extractPatientProfileFromText(responseText), false);
+            setCacheStatus('Case understanding saved to cache.');
+            setCaseUnderstanding(built);
+            return built;
+          } catch (err) {
+            console.error('Case understanding failed, using local extraction:', err);
+            const local = buildLocalCaseUnderstanding();
+            setCaseUnderstanding(local);
+            return local;
+          } finally {
+            setIsBuildingCaseUnderstanding(false);
+          }
+        };
+
+        const sanitizeTableCell = (value) => String(value || '')
+          .replace(/\|/g, ' / ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        const KNOWN_MEDICINES = [
+          'amlodipine','metformin','atorvastatin','rosuvastatin','paracetamol','acetaminophen','ibuprofen','aspirin','insulin','omeprazole','pantoprazole','azithromycin','amoxicillin','augmentin','cetirizine','levocetirizine','loratadine','montelukast','salbutamol','levothyroxine','losartan','valsartan','bisoprolol','metoprolol','furosemide','spironolactone','clopidogrel','warfarin','rivaroxaban','apixaban','esomeprazole','domperidone','ondansetron','doxycycline','ciprofloxacin','levofloxacin','cefuroxime','ceftriaxone','prednisolone','dexamethasone','hydrocortisone','diclofenac','naproxen','tramadol','pregabalin','gabapentin','vitamin d','vitamin d3','calcium','iron','folic acid'
+        ];
+        const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const KNOWN_MEDICINES_REGEX = new RegExp(`\\b(?:${KNOWN_MEDICINES.map(escapeRegex).join('|')})\\b`, 'i');
+        const KNOWN_MEDICINES_GLOBAL_REGEX = new RegExp(`\\b(?:${KNOWN_MEDICINES.map(escapeRegex).join('|')})\\b`, 'ig');
+        const DOSE_REGEX = /\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|iu|units?|%)\b/i;
+        const INSTRUCTION_REGEX = /\b(?:po|oral|od|qd|bid|tid|qid|qhs|hs|pc|ac|prn|sos|daily|once|twice|thrice|morning|evening|night|nocte|after food|before food|with food|empty stomach|for \d+ days?)\b/i;
+        const FORM_REGEX = /\b(?:tablet|tab\.?|capsule|cap\.?|syrup|drops|injection|inj\.?|cream|ointment|spray|gel|patch|sachet)\b/i;
+
+        const looksLikeNonMedicineLine = (line) => /\b(?:patient|name|age|gender|sex|exam|report|ultrasound|sonography|impression|findings|diagnosis|hospital|clinic|doctor|consultant|date|time|page|mrn|invoice|total|reference range|result|cholesterol|glucose|creatinine|hemoglobin)\b/i.test(line) && !KNOWN_MEDICINES_REGEX.test(line);
+
+        const splitPossibleMedicationSegments = (text) => {
+          const source = String(text || '')
+            .replace(/\r/g, '\n')
+            .replace(/[•●]/g, '\n- ')
+            .replace(/\s{2,}/g, ' ');
+          const rough = source.split(/\n|;/).map(x => x.trim()).filter(Boolean);
+          const segments = [];
+          for (const line of rough) {
+            const cleaned = line.replace(/^[-*\d.)\s]+/, '').trim();
+            if (!cleaned) continue;
+
+            // If PDF.js merged multiple medicines in one line, split immediately before known medicine names.
+            const withBreaks = cleaned.replace(KNOWN_MEDICINES_GLOBAL_REGEX, (match, offset) => offset > 0 ? `\n${match}` : match);
+            withBreaks.split('\n').map(x => x.trim()).filter(Boolean).forEach(x => segments.push(x));
+          }
+          return segments;
+        };
+
+        const extractMedicationCandidates = () => {
+          const corpus = getDocumentCorpus();
+          const segments = splitPossibleMedicationSegments(corpus);
+          const medRows = [];
+          const seen = new Set();
+
+          for (const segment of segments) {
+            if (looksLikeNonMedicineLine(segment)) continue;
+            const hasMed = KNOWN_MEDICINES_REGEX.test(segment);
+            const hasDose = DOSE_REGEX.test(segment);
+            const hasInstructionOrForm = INSTRUCTION_REGEX.test(segment) || FORM_REGEX.test(segment);
+            const hasPrescriptionContext = /\b(?:rx|medicine|medication|drug|prescribed|dose|sig)\b/i.test(segment);
+            if (!(hasMed || (hasDose && hasInstructionOrForm) || (hasPrescriptionContext && hasDose))) continue;
+
+            const knownMatch = segment.match(KNOWN_MEDICINES_REGEX);
+            const genericMatch = segment.match(/\b([A-Za-z][A-Za-z0-9+\-/()]{2,}(?:\s+[A-Za-z0-9+\-/()]{2,}){0,4})\s+(\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|iu|units?|%))\b/i);
+
+            const extractFullMedicineNameExactly = (rawSegment) => {
+              let s = String(rawSegment || '')
+                .replace(/^\s*(?:rx|medicine|medication|drug|sig)\s*[:\-]?\s*/i, '')
+                .replace(/^\s*[-*\d.)]+\s*/, '')
+                .trim();
+
+              // Keep the medicine name + strength exactly as written, but cut before instructions such as PO/BID/after food.
+              const instructionIndex = s.search(/\b(?:po|oral|od|qd|bid|tid|qid|qhs|hs|pc|ac|prn|sos|daily|once|twice|thrice|morning|evening|night|nocte|after food|before food|with food|empty stomach|for\s+\d+\s+days?|take|apply|use)\b/i);
+              if (instructionIndex > 0) s = s.slice(0, instructionIndex).trim();
+
+              // If there is a dose, keep only through the first dose token to avoid pulling multiple medicines into one row.
+              const doseMatch = s.match(/\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|iu|units?|%)\b/i);
+              if (doseMatch) s = s.slice(0, (doseMatch.index || 0) + doseMatch[0].length).trim();
+
+              s = s.replace(/[,:;\-\s]+$/g, '').trim();
+
+              const invalid = !s || s.length < 3 || s.length > 90 || /\b(?:patient|name|age|gender|sex|exam|report|ultrasound|impression|findings|diagnosis|hospital|clinic|date|time|reference|result)\b/i.test(s) || /\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4}/.test(s);
+              return invalid ? 'Unclear medicine name' : s;
+            };
+
+            let medicine = '';
+            if (knownMatch || genericMatch) {
+              medicine = extractFullMedicineNameExactly(segment);
+            } else {
+              medicine = 'Unclear medicine name';
+            }
+
+            const key = medicine.toLowerCase().replace(/\s+/g, ' ');
+            if (seen.has(key)) continue;
+            seen.add(key);
+            medRows.push({
+              medicine: sanitizeTableCell(medicine),
+              instruction: sanitizeTableCell(segment),
+              confidence: hasMed ? 'Medium' : 'Low'
+            });
+          }
+          return medRows.slice(0, 25);
+        };
+
+        const buildMedicationTable = () => {
+          const medRows = extractMedicationCandidates();
+          if (!medRows.length) {
+            return 'Medicine | Purpose | Instructions | Side Effects | Warnings\n--- | --- | --- | --- | ---\nNo clearly readable medicine detected | Not available yet | Upload a clearer prescription/medicine document or use Gemini Vision/OCR | Not available until medicine is identified | Verify unclear prescriptions with a doctor/pharmacist';
+          }
+          return 'Medicine | Purpose | Instructions | Side Effects | Warnings\n--- | --- | --- | --- | ---\n' + medRows.map(row => {
+            const purpose = row.confidence === 'Medium' ? 'Needs LLM/web enrichment for exact purpose' : 'Confirm medicine name first';
+            const sideEffects = row.confidence === 'Medium' ? 'Use Gemini/web enrichment for confirmed medicine' : 'Not safe to infer until name is confirmed';
+            const warnings = row.confidence === 'Medium' ? 'Verify dose, timing, duration, allergies, and interactions' : 'Verify unclear prescription with doctor/pharmacist';
+            return `${row.medicine} | ${purpose} | ${row.instruction || 'Not clearly stated in documents'} | ${sideEffects} | ${warnings}`;
+          }).join('\n');
+        };
+
+        const buildUploadedRoadmapGoals = () => {
+          const hasDocs = docs.length > 0;
+          const sourceNames = docs.map(d => d.name).join(', ');
+          const medicationTable = buildMedicationTable();
+          const labLines = extractLinesByRegex(/\b(cholesterol|ldl|hdl|triglycerides|hba1c|glucose|creatinine|egfr|hemoglobin|wbc|rbc|platelet|sodium|potassium|tsh|alt|ast|bilirubin|uric acid|high|low|mg\/dl|mmol\/l|%|ultrasound|sonography|usg|radiology|impression|findings|liver|kidney|gallbladder|abdomen|uterus|ovary|prostate)\b/i, 25).join('\n') || 'No clear lab/imaging/test findings detected yet. If this is a scanned PDF/image, use Gemini Vision or backend OCR.';
+          const diagnosisLines = extractLinesByRegex(/\b(diagnosis|diagnosed|impression|assessment|condition|findings|ultrasound|sonography|usg|radiology|hypertension|diabetes|hyperlipidemia|cardiac|infection|fracture|asthma|renal|kidney|liver|thyroid|gallbladder|abdomen|uterus|ovary)\b/i, 16).join('\n') || 'No clear diagnosis/report finding detected yet. If this is a scanned PDF/image, use Gemini Vision or backend OCR.';
+          const warningLines = extractLinesByRegex(/\b(allergy|allergic|avoid|contraindication|warning|renal|kidney|liver|pregnan|bleeding|chest pain|shortness|emergency|urgent|nsaid|ibuprofen|grapefruit)\b/i, 12).join('\n') || 'No explicit warning lines detected yet.';
+
+          return [
+            { id: 'uploaded-goal-1', icon: '🚨', color: 'from-rose-50 to-rose-100/50 hover:bg-rose-100/80 dark:from-rose-950/20 dark:to-rose-900/10 dark:border-rose-900/30', textColor: 'text-rose-800 dark:text-rose-300', title: '1. Is there anything urgent or dangerous I should not ignore?', desc: 'Red flags and safety issues from uploaded documents.', content: hasDocs ? `From your documents:\n${warningLines}\n\nSafety rule: do not ignore emergency symptoms such as chest pain, severe breathing difficulty, fainting, stroke-like symptoms, severe allergic reaction, or severe bleeding. This app cannot confirm safety.` : 'Upload medical documents to run a safety check.', evidence: `Sources checked: ${sourceNames || 'No uploaded sources yet'}` },
+            { id: 'uploaded-goal-2', icon: '📋', color: 'from-sky-50 to-sky-100/50 hover:bg-sky-100/80 dark:from-sky-950/20 dark:to-sky-900/10 dark:border-sky-900/30', textColor: 'text-sky-800 dark:text-sky-300', title: '2. What does my diagnosis or report show?', desc: 'Plain-English explanation based on extracted findings.', content: `Detected diagnosis/report lines:\n${diagnosisLines}\n\nUse the Gemini key to convert these into a concise plain-English explanation with trusted context.`, evidence: `Detected from: ${sourceNames}` },
+            { id: 'uploaded-goal-3', icon: '💊', color: 'from-purple-50 to-purple-100/50 hover:bg-purple-100/80 dark:from-purple-950/20 dark:to-purple-900/10 dark:border-purple-900/30', textColor: 'text-purple-800 dark:text-purple-300', title: '3. What medicines am I taking and why?', desc: 'Medication table with purpose, instructions, side effects, warnings.', content: medicationTable, evidence: `Medication-like lines detected from: ${sourceNames}` },
+            { id: 'uploaded-goal-4', icon: '✍️', color: 'from-amber-50 to-amber-100/50 hover:bg-amber-100/80 dark:from-amber-950/20 dark:to-amber-900/10 dark:border-amber-900/30', textColor: 'text-amber-800 dark:text-amber-300', title: '4. How should I understand my medicine instructions?', desc: 'Decoded prescription shorthand when readable.', content: `${medicationTable}\n\nCommon shorthand:\nPO = by mouth | QD/OD = once daily | BID = twice daily | TID = three times daily | PC = after meals | AC = before meals | PRN/SOS = as needed\n\nVerify unclear instructions with a pharmacist.`, evidence: `Instruction text detected from: ${sourceNames}` },
+            { id: 'uploaded-goal-5', icon: '⚠️', color: 'from-orange-50 to-orange-100/50 hover:bg-orange-100/80 dark:from-orange-950/20 dark:to-orange-900/10 dark:border-orange-900/30', textColor: 'text-orange-800 dark:text-orange-300', title: '5. What side effects or warnings should I watch for?', desc: 'Drug-specific side effects only after medicine extraction.', content: `Use the medication table first:\n${medicationTable}\n\nClicking this section with Gemini API enabled will read all uploaded documents, identify medicines, and fill only medicine-specific side effects/warnings using trusted sources. Unclear medicines stay verify-first.`, evidence: `Source context: ${sourceNames}` },
+            { id: 'uploaded-goal-6', icon: '📊', color: 'from-teal-50 to-teal-100/50 hover:bg-teal-100/80 dark:from-teal-950/20 dark:to-teal-900/10 dark:border-teal-900/30', textColor: 'text-teal-800 dark:text-teal-300', title: '6. What do my lab, imaging, or ultrasound results mean?', desc: 'Blood lab values and imaging/ultrasound findings detected from uploaded reports.', content: `Detected lab/result lines:\n${labLines}\n\nWith Gemini enabled, this will become a compact table: Test/Imaging | Result/Finding | Status/Impression | Plain-English meaning | Ask your doctor.`, evidence: `Lab-like lines detected from: ${sourceNames}` },
+            { id: 'uploaded-goal-7', icon: '🌱', color: 'from-emerald-50 to-emerald-100/50 hover:bg-emerald-100/80 dark:from-emerald-950/20 dark:to-emerald-900/10 dark:border-emerald-900/30', textColor: 'text-emerald-800 dark:text-emerald-300', title: '7. What daily lifestyle steps can support my treatment?', desc: 'Tailored diet, habits, and natural support from extracted diagnosis/labs.', content: `Based on currently extracted findings:\nDiagnosis/report clues:\n${diagnosisLines}\n\nLab clues:\n${labLines}\n\nGeneral safe support while extraction is refined:\n- Follow your clinician’s diet/fluid advice.\n- Do not change medicines yourself.\n- Prefer whole foods, less processed/salty food, and symptom/readings tracking if advised.\n\nClicking this section with Gemini API enabled will read the full case first, then generate tailored diet and safe natural-support guidance only for the extracted diagnoses/labs.`, evidence: `Based on uploaded sources: ${sourceNames}` },
+            { id: 'uploaded-goal-8', icon: '⏱️', color: 'from-indigo-50 to-indigo-100/50 hover:bg-indigo-100/80 dark:from-indigo-950/20 dark:to-indigo-900/10 dark:border-indigo-900/30', textColor: 'text-indigo-800 dark:text-indigo-300', title: '8. What should I track after this appointment?', desc: 'Home tracking suggestions based on extracted findings.', content: `Track only what is relevant to the uploaded case. Detected clues:\n${diagnosisLines}\n\nPossible tracking: symptoms, side effects, missed doses, follow-up dates, and doctor-recommended readings such as BP/glucose/temperature if mentioned.`, evidence: `Tracking suggestions generated from: ${sourceNames}` },
+            { id: 'uploaded-goal-9', icon: '❓', color: 'from-pink-50 to-pink-100/50 hover:bg-pink-100/80 dark:from-pink-950/20 dark:to-pink-900/10 dark:border-pink-900/30', textColor: 'text-pink-800 dark:text-pink-300', title: '9. What should I ask my doctor or pharmacist next?', desc: 'Questions based on extracted gaps and important items.', content: `Useful questions based on current extraction:\n1. Which diagnosis or lab result should I focus on first?\n2. Which medicines are short-term vs long-term?\n3. Can you confirm any unclear medicine dose, timing, or duration?\n4. Which side effects should make me call the clinic?\n5. When should I repeat any abnormal tests?`, evidence: `Questions generated from uploaded sources: ${sourceNames}` },
+            { id: 'uploaded-goal-10', icon: '🔍', color: 'from-fuchsia-50 to-fuchsia-100/50 hover:bg-fuchsia-100/80 dark:from-fuchsia-950/20 dark:to-fuchsia-900/10 dark:border-fuchsia-900/30', textColor: 'text-fuchsia-800 dark:text-fuchsia-300', title: '10. Which information needs professional verification?', desc: 'Unclear extraction, missing dose, missing duration, conflicts.', content: `Verify these before acting:\n- Blurry medicine names.\n- Missing dose/frequency/duration.\n- Conflicting medicine instructions.\n- Allergy conflicts or duplicate medicines.\n- Any scanned PDF/image where OCR/Vision has not confirmed the text.\n\nDetected warning clues:\n${warningLines}`, evidence: `Verification based on current sources: ${sourceNames}` }
+          ];
+        };
+
+        const activeGoals = isSampleCase ? GOALS_DATABASE : buildUploadedRoadmapGoals();
+
+        const getGoalDisplay = (goal) => {
+          const enhanced = enhancedGoalContent[goal.id];
+          if (!enhanced) return goal;
+          return { ...goal, content: enhanced.content || goal.content, evidence: enhanced.evidence || goal.evidence };
+        };
+
+        const buildGoalSpecificPrompt = (goal, understanding) => {
+          const local = understanding?.local || understanding || buildLocalCaseUnderstanding();
+          const caseSummary = understanding?.text
+            ? understanding.text
+            : JSON.stringify(local, null, 2);
+
+          const baseRules = `You are AZ MedStudio, a patient-safe medical document explainer and organizer, not a doctor.
+
+You already have a PATIENT CASE MEMORY created from all uploaded documents. Use it like ChatGPT/Gemini uses an uploaded file: answer the selected roadmap heading by pulling only the relevant facts from the case memory, then use trusted internet knowledge only to fill gaps for that exact topic when internet enrichment is enabled.
+
+Absolute output rules:
+- Output ONLY the selected roadmap section. Do not dump the whole document or the whole case memory.
+- Do not list every extracted fact unless that fact belongs to this selected heading.
+- Keep the answer concise and useful for a busy patient: usually 6-10 bullets or one compact table. No long essays.
+- First use "From your documents" facts. Then add "General trusted guidance" only where it improves this section.
+- Do not repeat the same diagnosis/lab/medicine across unrelated sections.
+- Do not include raw URLs, markdown links, or long source lists. The app will append clean source names separately.
+- Do not diagnose independently, prescribe, or tell the user to start/stop/change medicine.
+- For unclear medicine names/doses/instructions, write "verify with doctor/pharmacist".
+- If the document evidence is weak, explain the exact missing item instead of giving a generic filler paragraph.
+- Internet info should be supportive, not dominant. It should never override uploaded document instructions.
+- If internet enrichment is disabled, use only the case memory and say nothing about web sources.`;
+
+          let sectionRules = '';
+          if (/medicines am I taking/i.test(goal.title)) {
+            sectionRules = `Medication section only.
+Return exactly ONE clean markdown table with these columns:
+Medicine | Purpose | Instructions | Side Effects | Warnings
+Rules:
+- First use the 4B) MEDICATIONS_JSON section from the case memory if present. Render one table row for each JSON object only.
+- Extract the full medicine name exactly as written in the document. Do not shorten it.
+- Do not guess unclear names. If the name is unclear, write "Unclear medicine name" and mark the warning as "Verify with doctor/pharmacist".
+- Do not merge multiple medicines into one row. Each medicine must be one separate row.
+- Include only medicines clearly found in the case memory or attached documents. If a medicines/prescription document was uploaded, prioritize it heavily.
+- Do not create rows for diagnoses, lab tests, hospitals, patient names, dates, exam names, or random text.
+- Purpose may use document context plus trusted general knowledge.
+- Instructions must come from the uploaded documents only; if missing, write "Not clearly stated in documents".
+- Side Effects should include 2-4 common side effects from trusted general knowledge for each clearly identified medicine.
+- Warnings should include document warnings plus the most important common warnings/interactions only.
+- Do not include diagnosis explanation, lab explanations, diet advice, or whole-document text. Keep only the table.`;
+          } else if (/side effects/i.test(goal.title)) {
+            sectionRules = `Side effects/warnings section only.
+Use clearly extracted medicines only. Use the exact full medicine name from the document; do not shorten or guess; do not merge medicines. Return a compact table:
+Medicine | Common side effects | Serious warning signs | Patient-safe note
+Do not include lab interpretation, lifestyle plan, or diagnosis explanation.`;
+          } else if (/lifestyle/i.test(goal.title)) {
+            sectionRules = `Lifestyle section only.
+Use extracted diagnoses/labs/clinician instructions from the case memory. Then add trusted general guidance for diet, natural supportive habits, activity, hydration, and foods to limit.
+Keep it focused and practical. Use these headings only:
+- What your documents suggest
+- Diet and food choices
+- Natural/supportive habits
+- What to avoid or confirm first
+Rules:
+- Do not include a medicine table.
+- Do not suggest supplements, herbal remedies, fasting, detox, or extreme diets as treatment. If mentioned, say to ask the doctor first.
+- Respect any doctor diet/fluid restrictions from documents.`;
+          } else if (/lab results/i.test(goal.title)) {
+            sectionRules = `Lab/imaging section only.
+Return a compact table:
+Test/Imaging | Result/Finding | Status/Impression | Plain-English meaning | What to ask
+Include blood labs AND ultrasound/sonography/USG/radiology findings from the case memory. Add one short general note only if internet helps explain the test meaning.`;
+          } else if (/diagnosis|report show/i.test(goal.title)) {
+            sectionRules = `Diagnosis/report section only.
+Explain only detected diagnoses or report findings in plain English. Use 2-5 short cards/bullets.
+Do not include medicine side effects, diet lists, or a full lab table.`;
+          } else if (/urgent|dangerous/i.test(goal.title)) {
+            sectionRules = `Safety section only.
+Focus only on emergency red flags, allergies, contraindications, dangerous interactions, critical lab values, unclear doses, and conflicting instructions.
+Never say "you are safe". If no red flag is found, say "No obvious emergency warning was detected in the available documents" and include the standard limitation.`;
+          } else if (/medicine instructions/i.test(goal.title)) {
+            sectionRules = `Medicine instruction section only.
+Decode prescription shorthand and show how the uploaded document says each medicine should be taken.
+Return a compact table:
+Medicine | Original instruction | Plain-English instruction | Needs verification?
+Rules:
+- Use the full medicine name exactly as written in the document.
+- Do not shorten names.
+- Do not guess unclear names; use "Unclear medicine name" when uncertain.
+- Do not merge multiple medicines into one row.
+- Do not add side effects except if a warning is directly tied to the instruction.`;
+          } else if (/track/i.test(goal.title)) {
+            sectionRules = `Tracking section only.
+Suggest only tracking items relevant to extracted diagnoses/labs/medicines/follow-up. Return:
+What to track | How often | Why it matters
+Do not include diet plan or medicine side effects.`;
+          } else if (/ask my doctor/i.test(goal.title)) {
+            sectionRules = `Doctor/pharmacist questions section only.
+Generate 3-5 highly specific questions based on actual extracted medicines, labs, diagnoses, warnings, follow-ups, and unclear items. Do not give generic questions if specific facts exist.`;
+          } else if (/verification/i.test(goal.title)) {
+            sectionRules = `Verification section only.
+List only unclear/risky items needing professional confirmation. Return short bullets with source/context. Do not educate broadly.`;
+          }
+
+          return `${baseRules}\n\nSelected roadmap heading: ${goal.title}
+Internet enrichment enabled: ${useRoadmapInternet ? 'YES' : 'NO'}\n${sectionRules}\n\nPATIENT CASE MEMORY FROM ALL UPLOADED DOCUMENTS:\n${caseSummary}`;
+        };
+
+        const fetchGeminiWithDocuments = async (goal, understanding) => {
+          if (!apiKey) return null;
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+          const parts = [{ text: buildGoalSpecificPrompt(goal, understanding) }];
+
+          docs.filter(d => d.sourceMode === 'uploaded' && d.base64Data && (d.fileKind === 'pdf' || d.fileKind === 'image')).filter(d => (d.base64Data || '').length < 7000000).slice(0, 4).forEach(d => {
+            parts.push({ text: `\nAttached source file: ${d.name} (${d.mimeType || d.type})` });
+            parts.push({ inline_data: { mime_type: d.mimeType || (d.fileKind === 'pdf' ? 'application/pdf' : 'image/jpeg'), data: d.base64Data } });
+          });
+
+          const payload = {
+            contents: [{ parts }],
+            systemInstruction: { parts: [{ text: 'You are a careful medical document Q&A assistant. Answer only the selected roadmap section from the case memory and attached sources. For medicine sections, preserve exact full medicine names as written; never shorten, guess, or merge medicines. Be concise, conservative, and section-specific.' }] },
+            generationConfig: { temperature: 0.2 },
+            ...(useRoadmapInternet ? { tools: [{ google_search: {} }] } : {})
+          };
+
+          const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            console.error('Gemini multimodal roadmap error:', errorData);
+            throw new Error('Gemini document analysis failed');
+          }
+          return response.json();
+        };
+
+        const handleSelectRoadmapGoal = async (goal) => {
+          setSelectedGoalId(goal.id);
+          clearMiddleTranslations();
+          clearGeneratedMiddlePanels();
+          setMiddleView('roadmap');
+
+          if (isSampleCase || enhancedGoalContent[goal.id]) return;
+          const resultCacheKey = `az-medstudio-cache:v2-meds:goal:${getDocsFingerprint()}:${goal.id}:web-${useRoadmapInternet ? 'on' : 'off'}:lang-${middleViewLang}`;
+          const cachedGoal = cacheGet(resultCacheKey);
+          if (cachedGoal) {
+            setEnhancedGoalContent(prev => ({ ...prev, [goal.id]: cachedGoal }));
+            setCacheStatus('Loaded this roadmap section from cache. No new Gemini/web call was made.');
+            return;
+          }
+          setEnhancingGoalId(goal.id);
+          setEnhancedGoalContent(prev => ({
+            ...prev,
+            [goal.id]: {
+              content: apiKey
+                ? `Reading all uploaded documents first, then generating only: ${goal.title}${cacheEnabled ? ' (cache enabled)' : ''}`
+                : goal.content,
+              evidence: apiKey ? 'Building a case understanding from uploaded sources. No sample case is being used.' : goal.evidence
+            }
+          }));
+
+          if (!apiKey) {
+            setEnhancingGoalId(null);
+            return;
+          }
+
+          try {
+            const understanding = await fetchCaseUnderstanding();
+            setEnhancedGoalContent(prev => ({
+              ...prev,
+              [goal.id]: {
+                content: `Case understanding built. Now generating only this roadmap section: ${goal.title}`,
+                evidence: `Sources checked: ${docs.map(d => d.name).join(', ')}`
+              }
+            }));
+            const result = await fetchGeminiWithDocuments(goal, understanding);
+            const rawText = result?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('\n').trim() || 'No section analysis was generated.';
+            const groundingChunks = result?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+            const finalGoalPayload = {
+              content: stripModelSourceDump(rawText),
+              evidence: `Sources checked: ${docs.map(d => d.name).join(', ')}${formatCleanGroundingSources(groundingChunks)}`
+            };
+            cacheSet(resultCacheKey, finalGoalPayload);
+            setCacheStatus('Roadmap section saved to cache. Re-clicking it will not call Gemini/web again.');
+            setEnhancedGoalContent(prev => ({
+              ...prev,
+              [goal.id]: finalGoalPayload
+            }));
+          } catch (err) {
+            setEnhancedGoalContent(prev => ({
+              ...prev,
+              [goal.id]: {
+                content: `${goal.content}\n\nAI document extraction could not run. Check your Gemini API key, file size, and network connection. For scanned PDFs/images, a multimodal Gemini key or backend OCR is required.`,
+                evidence: goal.evidence
+              }
+            }));
+          } finally {
+            setEnhancingGoalId(null);
+          }
+        };
+
 
         const getRawMiddleWorkspaceText = () => {
           if (middleView === 'intro') return LOCALIZATION_DICTIONARY.en.workspaceIntroDesc;
@@ -1009,10 +1938,11 @@ Output rules:
               LOCALIZATION_DICTIONARY.en.uncertaintyItem3
             ].join('\n');
           }
-          if (middleView === 'summary') return LOCALIZATION_DICTIONARY.en.summaryFaris;
+          if (middleView === 'summary') return isSampleCase ? LOCALIZATION_DICTIONARY.en.summaryFaris : getDocumentCorpus().slice(0, 2000);
           if (middleView === 'roadmap') {
-            const goal = GOALS_DATABASE.find(g => g.id === selectedGoalId);
-            return goal ? `${goal.title}\n\n${goal.content}\n\nEvidence: ${goal.evidence}` : '';
+            const goal = activeGoals.find(g => g.id === selectedGoalId);
+            const displayGoal = goal ? getGoalDisplay(goal) : null;
+            return displayGoal ? `${displayGoal.title}\n\n${displayGoal.content}\n\nEvidence: ${displayGoal.evidence}` : '';
           }
           return '';
         };
@@ -1056,9 +1986,10 @@ ${text}`;
           // Static panels already use LOCALIZATION_DICTIONARY. Only preview/roadmap dynamic text needs live translation.
           if (!['preview', 'roadmap'].includes(middleView)) return;
 
-          const selectedGoal = GOALS_DATABASE.find(g => g.id === selectedGoalId);
-          const sourceText = middleView === 'roadmap' ? (selectedGoal?.content || '') : getRawMiddleWorkspaceText();
-          const sourceEvidence = middleView === 'roadmap' ? (selectedGoal?.evidence || '') : '';
+          const selectedGoal = activeGoals.find(g => g.id === selectedGoalId);
+          const displayGoal = selectedGoal ? getGoalDisplay(selectedGoal) : null;
+          const sourceText = middleView === 'roadmap' ? (displayGoal?.content || '') : getRawMiddleWorkspaceText();
+          const sourceEvidence = middleView === 'roadmap' ? (displayGoal?.evidence || '') : '';
           if (!sourceText.trim() && !sourceEvidence.trim()) return;
 
           // Without an API key, sample labels still localize, but custom free text cannot be translated.
@@ -1105,11 +2036,12 @@ ${text}`;
             return labels.uncertaintyDesc;
           }
           if (middleView === 'summary') {
-            return labels.summaryFaris;
+            return isSampleCase ? labels.summaryFaris : (translatedMiddleText || getDocumentCorpus().slice(0, 2000) || labels.summaryGeneral);
           }
           if (middleView === 'roadmap') {
-            const goal = GOALS_DATABASE.find(g => g.id === selectedGoalId);
-            return goal ? `${goal.title}\n\n${goal.content}\n\n${goal.evidence}` : "No specific goal selected.";
+            const goal = activeGoals.find(g => g.id === selectedGoalId);
+            const displayGoal = goal ? getGoalDisplay(goal) : null;
+            return displayGoal ? `${displayGoal.title}\n\n${displayGoal.content}\n\n${displayGoal.evidence}` : "No specific goal selected.";
           }
           return "";
         };
@@ -1154,7 +2086,7 @@ ${text}`;
         // PDF Generator: Formats a pristine print layout containing ALL 10 Clinical Goals
         const handlePrintGoals = () => {
           const printWindow = window.open('', '_blank');
-          const goalsHTML = GOALS_DATABASE.map(goal => `
+          const goalsHTML = activeGoals.map(goal => `
             <div style="margin-bottom: 25px; page-break-inside: avoid; border-bottom: 1px solid #e2e8f0; padding-bottom: 15px;">
               <h3 style="color: #1e1b4b; font-family: sans-serif; margin-bottom: 8px;">${goal.title}</h3>
               <p style="font-size: 13px; color: #475569; font-style: italic; margin-bottom: 10px;">${goal.desc}</p>
@@ -1226,12 +2158,10 @@ ${text}`;
               .replace(/Highly elevated fatty lipids/g, "Lipides gras très élevés")
               .replace(/Taken by mouth/g, "Pris par la bouche")
               .replace(/Once daily/g, "Une fois par jour");
-          } else if (middleViewLang === 'ar') {
-            result = "تمت الترجمة تلقائياً: " + result;
-          } else if (middleViewLang === 'hi') {
-            result = "स्वचालित अनुवाद: " + result;
-          } else if (middleViewLang === 'ur') {
-            result = "خودکار ترجمہ: " + result;
+          } else if (['ar', 'hi', 'ur'].includes(middleViewLang)) {
+            // For dynamic uploaded-document answers, do not fake-translate by adding a prefix.
+            // Real translation is handled by translateMedicalText() when an API key is available.
+            result = content;
           }
           return result;
         };
@@ -1602,11 +2532,21 @@ ${text}`;
                           </div>
                         </div>
                       ) : (
-                        <div className="bg-slate-900 text-slate-100 font-mono text-xs p-4 rounded-xl leading-relaxed overflow-y-auto max-h-[350px] whitespace-pre-wrap">
-                          {isTranslatingMiddle
-                            ? `Translating current view to ${LANGUAGE_NAMES[middleViewLang] || middleViewLang}...`
-                            : (translatedMiddleText || translateDocContent(currentActiveDoc.id, middleViewLang) || translateRoadmapContent(currentActiveDoc.content))}
-                        </div>
+                        <>
+                          {currentActiveDoc.fileKind === 'pdf' && currentActiveDoc.previewUrl && (
+                            <PdfCanvasPreview fileUrl={currentActiveDoc.previewUrl} fileName={currentActiveDoc.name} />
+                          )}
+                          {currentActiveDoc.fileKind === 'image' && currentActiveDoc.previewUrl && (
+                            <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white mb-3 flex justify-center">
+                              <img src={currentActiveDoc.previewUrl} alt={currentActiveDoc.name} className="max-h-[420px] object-contain" />
+                            </div>
+                          )}
+                          <div className="bg-slate-900 text-slate-100 font-mono text-xs p-4 rounded-xl leading-relaxed overflow-y-auto max-h-[350px] whitespace-pre-wrap">
+                            {isTranslatingMiddle
+                              ? `Translating current view to ${LANGUAGE_NAMES[middleViewLang] || middleViewLang}...`
+                              : (translatedMiddleText || translateDocContent(currentActiveDoc.id, middleViewLang) || translateRoadmapContent(currentActiveDoc.content))}
+                          </div>
+                        </>
                       )}
                     </div>
                   )}
@@ -1631,7 +2571,8 @@ ${text}`;
                   {middleView === 'roadmap' && (
                     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl p-6 shadow-xs flex-1 flex flex-col gap-4">
                       {(() => {
-                        const goalItem = GOALS_DATABASE.find(g => g.id === selectedGoalId);
+                        const rawGoalItem = activeGoals.find(g => g.id === selectedGoalId);
+                        const goalItem = rawGoalItem ? getGoalDisplay(rawGoalItem) : null;
                         if (!goalItem) return <p className="text-xs text-slate-400">{labels.noEvidence}</p>;
                         return (
                           <>
@@ -1647,7 +2588,7 @@ ${text}`;
                             <div className="bg-slate-50 dark:bg-slate-850/60 p-4 rounded-xl text-xs text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap font-medium">
                               {isTranslatingMiddle
                                 ? `Translating current view to ${LANGUAGE_NAMES[middleViewLang] || middleViewLang}...`
-                                : (translatedMiddleText || translateRoadmapContent(goalItem.content))}
+                                : <FormattedMedicalText text={translatedMiddleText || translateRoadmapContent(goalItem.content)} />}
                             </div>
 
                             {/* Linked source highlighting element */}
@@ -1668,7 +2609,7 @@ ${text}`;
                         📁 {labels.summaryTitle}
                       </h3>
                       <div className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed flex flex-col gap-3">
-                        <p>{docs.length > 0 && docs.some(d => d.id === 'doc-discharge-metropolitan') ? labels.summaryFaris : labels.summaryGeneral}</p>
+                        <p>{isSampleCase ? labels.summaryFaris : (getDocumentCorpus().slice(0, 1200) || labels.summaryGeneral)}</p>
                       </div>
                     </div>
                   )}
@@ -1678,12 +2619,12 @@ ${text}`;
                     <div className="space-y-4 flex-1">
                       {/* Blood Pressure and Lipids Chart */}
                       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl p-5 shadow-sm">
-                        <h3 className="font-bold text-slate-800 dark:text-slate-100 text-xs mb-3">{labels.chartsTitle}</h3>
+                        <h3 className="font-bold text-slate-800 dark:text-slate-100 text-xs mb-3">{isSampleCase ? labels.chartsTitle : 'Charts from uploaded data'}</h3>
                         <div className="space-y-3">
                           <div>
                             <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400 mb-1">
                               <span>{labels.totalChol}</span>
-                              <span className="font-bold text-rose-600">240 (High)</span>
+                              <span className="font-bold text-rose-600">{isSampleCase ? '240 (High)' : 'Upload lab text / use AI extraction'}</span>
                             </div>
                             <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                               <div className="bg-rose-500 h-full rounded-full" style={{ width: '85%' }}></div>
@@ -1693,7 +2634,7 @@ ${text}`;
                           <div>
                             <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400 mb-1">
                               <span>{labels.badChol}</span>
-                              <span className="font-bold text-rose-600">155 (High)</span>
+                              <span className="font-bold text-rose-600">{isSampleCase ? '155 (High)' : 'Not sample data'}</span>
                             </div>
                             <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                               <div className="bg-rose-500 h-full rounded-full" style={{ width: '75%' }}></div>
@@ -1703,7 +2644,7 @@ ${text}`;
                           <div>
                             <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400 mb-1">
                               <span>{labels.goodChol}</span>
-                              <span className="font-bold text-amber-600">38 (Low)</span>
+                              <span className="font-bold text-amber-600">{isSampleCase ? '38 (Low)' : 'Not sample data'}</span>
                             </div>
                             <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                               <div className="bg-amber-500 h-full rounded-full" style={{ width: '45%' }}></div>
@@ -1719,7 +2660,7 @@ ${text}`;
                         <div className="grid grid-cols-4 gap-2 text-center">
                           <div className="bg-slate-50 dark:bg-slate-850 p-2 rounded border dark:border-slate-750">
                             <span className="text-[10px] font-bold text-slate-500 block">{labels.morning}</span>
-                            <span className="text-xs font-bold text-indigo-700 dark:text-indigo-400 mt-1 block">Amlodipine</span>
+                            <span className="text-xs font-bold text-indigo-700 dark:text-indigo-400 mt-1 block">{isSampleCase ? 'Amlodipine' : 'From uploaded meds'}</span>
                           </div>
                           <div className="bg-slate-50 dark:bg-slate-850 p-2 rounded border dark:border-slate-750">
                             <span className="text-[10px] font-bold text-slate-500 block">{labels.afternoon}</span>
@@ -1743,21 +2684,33 @@ ${text}`;
                     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-2xl p-5 shadow-sm flex-1">
                       <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm mb-4">{labels.timelineTitle}</h3>
                       <div className="relative border-l-2 border-indigo-100 pl-4 space-y-5 ml-2">
-                        <div className="relative">
-                          <div className="absolute -left-[21px] top-1 bg-indigo-500 h-2 w-2 rounded-full border border-white"></div>
-                          <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">{labels.dischargeTitle}</h4>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400">{labels.dischargeDesc}</p>
-                        </div>
-                        <div className="relative">
-                          <div className="absolute -left-[21px] top-1 bg-indigo-500 h-2 w-2 rounded-full border border-white"></div>
-                          <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">{labels.lipidTitle}</h4>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400">{labels.lipidDesc}</p>
-                        </div>
-                        <div className="relative">
-                          <div className="absolute -left-[21px] top-1 bg-amber-500 h-2 w-2 rounded-full border border-white"></div>
-                          <h4 className="text-xs font-bold text-amber-700 dark:text-amber-400">{labels.cardioOutpatient}</h4>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400">{labels.cardioDesc}</p>
-                        </div>
+                        {isSampleCase ? (
+                          <>
+                            <div className="relative">
+                              <div className="absolute -left-[21px] top-1 bg-indigo-500 h-2 w-2 rounded-full border border-white"></div>
+                              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">{labels.dischargeTitle}</h4>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400">{labels.dischargeDesc}</p>
+                            </div>
+                            <div className="relative">
+                              <div className="absolute -left-[21px] top-1 bg-indigo-500 h-2 w-2 rounded-full border border-white"></div>
+                              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">{labels.lipidTitle}</h4>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400">{labels.lipidDesc}</p>
+                            </div>
+                            <div className="relative">
+                              <div className="absolute -left-[21px] top-1 bg-amber-500 h-2 w-2 rounded-full border border-white"></div>
+                              <h4 className="text-xs font-bold text-amber-700 dark:text-amber-400">{labels.cardioOutpatient}</h4>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400">{labels.cardioDesc}</p>
+                            </div>
+                          </>
+                        ) : (
+                          docs.map((doc, idx) => (
+                            <div className="relative" key={doc.id}>
+                              <div className="absolute -left-[21px] top-1 bg-indigo-500 h-2 w-2 rounded-full border border-white"></div>
+                              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">Uploaded source {idx + 1}: {doc.name}</h4>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400">{doc.status} • {doc.confidence} confidence</p>
+                            </div>
+                          ))
+                        )}
                       </div>
                     </div>
                   )}
@@ -1784,12 +2737,12 @@ ${text}`;
                       </strong>
                       <div className="border-l-2 border-indigo-500 pl-3 italic font-mono text-[11px] text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
                         {middleView === 'roadmap' && selectedGoalId
-                          ? (translatedEvidenceText || GOALS_DATABASE.find(g => g.id === selectedGoalId)?.evidence || labels.evidenceQuote)
+                          ? (translatedEvidenceText || getGoalDisplay(activeGoals.find(g => g.id === selectedGoalId) || {})?.evidence || labels.evidenceQuote)
                           : labels.evidenceQuote}
                       </div>
                       <p className="text-[11px] leading-relaxed">
                         <strong>{labels.clinicalPrecaution}:</strong> {middleView === 'roadmap' && selectedGoalId
-                          ? (translatedMiddleText || GOALS_DATABASE.find(g => g.id === selectedGoalId)?.content || labels.evidenceTakeaway)
+                          ? (translatedMiddleText || getGoalDisplay(activeGoals.find(g => g.id === selectedGoalId) || {})?.content || labels.evidenceTakeaway)
                           : labels.evidenceTakeaway}
                       </p>
                     </div>
@@ -1816,6 +2769,21 @@ ${text}`;
                 {/* NotebookLM Styled Colorful Grid list of 10 goals as clinical roadmap sections (Hidden when docs is empty) */}
                 <div className="p-4 flex flex-col gap-2.5 overflow-y-auto h-96 border-b border-slate-100 dark:border-slate-850 bg-[#fbfbfd] dark:bg-slate-900/40 shrink-0">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide no-print">Clinical Roadmap Sections:</p>
+                  <div className="no-print flex flex-col gap-1.5 bg-white/70 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-[10px] text-slate-500">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={useRoadmapInternet} onChange={(e) => setUseRoadmapInternet(e.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 scale-90" />
+                      Use internet enrichment for roadmap sections
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={cacheEnabled} onChange={(e) => setCacheEnabled(e.target.checked)} className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 scale-90" />
+                      Cache document understanding and section answers
+                    </label>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[9px] text-slate-400 leading-tight">Cache reduces repeated Gemini/web calls for the same uploaded files.</span>
+                      <button onClick={clearAzMedCache} className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800">Clear</button>
+                    </div>
+                    {cacheStatus && <p className="text-[9px] text-emerald-700 font-semibold leading-tight">{cacheStatus}</p>}
+                  </div>
                   
                   {docs.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-6 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
@@ -1825,17 +2793,12 @@ ${text}`;
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-2">
-                      {GOALS_DATABASE.map((goal) => {
+                      {activeGoals.map((goal) => {
                         const isSelected = selectedGoalId === goal.id && middleView === 'roadmap';
                         return (
                           <div 
                             key={goal.id}
-                            onClick={() => {
-                              setSelectedGoalId(goal.id);
-                              clearMiddleTranslations();
-                              clearGeneratedMiddlePanels();
-                              setMiddleView('roadmap');
-                            }}
+                            onClick={() => handleSelectRoadmapGoal(goal)}
                             className={`p-3 rounded-xl border transition cursor-pointer flex items-start gap-3 bg-gradient-to-r ${goal.color} ${
                               isSelected ? 'ring-2 ring-indigo-500 border-transparent shadow-sm' : 'border-slate-200/60 dark:border-slate-800'
                             }`}
@@ -1845,7 +2808,7 @@ ${text}`;
                             </div>
                             <div className="min-w-0 flex-1">
                               <strong className={`text-xs font-bold block leading-tight ${goal.textColor}`}>{goal.title}</strong>
-                              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-tight truncate">{goal.desc}</p>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-tight truncate">{enhancingGoalId === goal.id ? 'Building focused answer from case memory...' : goal.desc}</p>
                             </div>
                           </div>
                         );
@@ -1938,7 +2901,7 @@ ${text}`;
 
       // Render App inside div#root
       const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(<App />);
+      root.render(<AppErrorBoundary><App /></AppErrorBoundary>);
     </script>
 </body>
 </html>
