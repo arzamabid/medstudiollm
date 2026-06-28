@@ -644,21 +644,35 @@
           while (i < lines.length) {
             const line = lines[i] || '';
             const next = lines[i + 1] || '';
-            const looksLikeTable = line.includes('|') && isSeparator(next);
+            const looksLikeMedicineHeader = /^\s*\|?\s*Medicine\s*\|\s*Purpose\s*\|\s*Instructions\s*\|\s*Side Effects\s*\|\s*Warnings\s*\|?\s*$/i.test(line);
+            const looksLikeTable = line.includes('|') && (isSeparator(next) || looksLikeMedicineHeader);
 
             if (looksLikeTable) {
               flushParagraph();
               const headers = splitTableRow(line).filter(Boolean);
-              i += 2;
+              i += 1;
+              // Skip one or more markdown separator / dash-only lines, including malformed LLM separators.
+              while (i < lines.length && (/^\s*\|?\s*:?-{2,}:?[-\s|:]*$/.test(lines[i] || '') || isSeparator(lines[i] || ''))) {
+                i += 1;
+              }
               const rows = [];
               while (i < lines.length && lines[i].includes('|') && !/^\s*$/.test(lines[i])) {
-                if (!isSeparator(lines[i])) {
+                if (!isSeparator(lines[i]) && !/^\s*\|?\s*:?-{2,}:?[-\s|:]*$/.test(lines[i] || '')) {
                   const cells = splitTableRow(lines[i], headers.length);
-                  if (cells.some(Boolean)) rows.push(cells);
+                  // Ignore blank/separator rows such as "-----" accidentally emitted by the model.
+                  if (cells.some(c => c && !/^:?-{2,}:?$/.test(c.trim()))) rows.push(cells);
                 }
                 i += 1;
               }
               if (!headers.length) continue;
+              if (!rows.length) {
+                elements.push(
+                  <div key={`empty-table-${elements.length}`} className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    No usable rows were returned for this table. The app hid the broken empty table instead of showing dashed lines.
+                  </div>
+                );
+                continue;
+              }
               elements.push(
                 <div key={`t-${elements.length}`} className="overflow-x-auto my-2">
                   <table className="min-w-full text-[11px] border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden bg-white dark:bg-slate-900">
@@ -1608,6 +1622,236 @@ ${getDocumentCorpus().slice(0, 18000)}`;
           .replace(/\s+/g, ' ')
           .trim();
 
+        const findJsonArrayAfterLabel = (text, label) => {
+          const source = String(text || '');
+          const labelIndex = source.toLowerCase().indexOf(String(label || '').toLowerCase());
+          const startSearch = labelIndex >= 0 ? labelIndex : 0;
+          const start = source.indexOf('[', startSearch);
+          if (start < 0) return null;
+          let depth = 0;
+          let inString = false;
+          let escaped = false;
+          for (let i = start; i < source.length; i++) {
+            const ch = source[i];
+            if (inString) {
+              if (escaped) escaped = false;
+              else if (ch === '\\') escaped = true;
+              else if (ch === '"') inString = false;
+              continue;
+            }
+            if (ch === '"') inString = true;
+            else if (ch === '[') depth += 1;
+            else if (ch === ']') {
+              depth -= 1;
+              if (depth === 0) return source.slice(start, i + 1);
+            }
+          }
+          return null;
+        };
+
+        const splitMarkdownTableRow = (row, expectedCells = null) => {
+          const cells = String(row || '')
+            .replace(/^\s*\|/, '')
+            .replace(/\|\s*$/, '')
+            .split('|')
+            .map(x => x.trim());
+          if (expectedCells && cells.length > expectedCells) {
+            return [...cells.slice(0, expectedCells - 1), cells.slice(expectedCells - 1).join(' / ')];
+          }
+          return cells;
+        };
+
+        const parseMedicationJsonFromCaseMemory = (understanding) => {
+          const text = understanding?.text || '';
+          const jsonText = findJsonArrayAfterLabel(text, '4B) MEDICATIONS_JSON') || findJsonArrayAfterLabel(text, 'MEDICATIONS_JSON');
+          if (!jsonText) return [];
+          try {
+            const parsed = JSON.parse(jsonText);
+            if (!Array.isArray(parsed)) return [];
+            return parsed
+              .map(item => ({
+                medicine: sanitizeTableCell(item.medicine_name_exact || item.medicine || item.name || 'Unclear medicine name'),
+                strength: sanitizeTableCell(item.strength || ''),
+                instructions: sanitizeTableCell([
+                  item.dose,
+                  item.route,
+                  item.frequency,
+                  item.timing,
+                  item.duration
+                ].filter(Boolean).join(' ') || item.original_instruction || item.instruction || ''),
+                source: sanitizeTableCell(item.source || ''),
+                confidence: sanitizeTableCell(item.confidence || 'low'),
+                needsVerification: Boolean(item.needs_verification || /unclear/i.test(item.medicine_name_exact || item.name || ''))
+              }))
+              .filter(item => item.medicine && !/^(medicine|drug|medication)$/i.test(item.medicine));
+          } catch (err) {
+            console.warn('Medication JSON parse failed:', err);
+            return [];
+          }
+        };
+
+        const buildStrictMedicationTableFromRows = (rows, includeEnrichmentPlaceholders = true) => {
+          if (!rows || !rows.length) {
+            return 'No clearly readable medicine was extracted from the uploaded documents. If a medicine document was uploaded, use Gemini Vision/OCR or upload a clearer prescription image/PDF. Do not guess medicine names.';
+          }
+          const header = 'Medicine | Purpose | Instructions | Side Effects | Warnings\n|---|---|---|---|---|';
+          const body = rows.map(row => {
+            const medicineName = row.medicine || 'Unclear medicine name';
+            const instruction = row.instructions || 'Not clearly stated in documents';
+            const purpose = includeEnrichmentPlaceholders && !/unclear medicine name/i.test(medicineName)
+              ? 'Use document context + trusted drug reference'
+              : 'Confirm medicine name first';
+            const sideEffects = includeEnrichmentPlaceholders && !/unclear medicine name/i.test(medicineName)
+              ? 'Use trusted drug reference after confirming medicine'
+              : 'Not safe to infer until medicine is confirmed';
+            const warningBits = [];
+            if (row.needsVerification || /low/i.test(row.confidence || '')) warningBits.push('Verify with doctor/pharmacist');
+            if (row.source) warningBits.push(`Source: ${row.source}`);
+            const warnings = warningBits.join('; ') || 'Check dose, duration, allergies, and interactions';
+            return `${sanitizeTableCell(medicineName)} | ${sanitizeTableCell(purpose)} | ${sanitizeTableCell(instruction)} | ${sanitizeTableCell(sideEffects)} | ${sanitizeTableCell(warnings)}`;
+          }).join('\n');
+          return `${header}\n${body}`;
+        };
+
+        const getRenderableMedicationContent = (rawText, understanding) => {
+          const text = stripModelSourceDump(String(rawText || '')).trim();
+          const jsonRows = parseMedicationJsonFromCaseMemory(understanding);
+          const tableLines = text.split(/\n/).map(x => x.trim()).filter(Boolean);
+          const hasMedicineHeader = tableLines.some(line => /^\|?\s*Medicine\s*\|\s*Purpose\s*\|\s*Instructions\s*\|\s*Side Effects\s*\|\s*Warnings/i.test(line));
+          const validDataRows = tableLines.filter(line =>
+            line.includes('|') &&
+            !/^\|?\s*Medicine\s*\|/i.test(line) &&
+            !/^\|?\s*:?-{2,}:?[-\s|:]*$/.test(line) &&
+            splitMarkdownTableRow(line, 5).filter(Boolean).length >= 3
+          );
+
+          // The screenshot issue: model returned only a header and separator/dash lines.
+          // In that case, do not show broken markdown; fall back to structured medication JSON/local rows.
+          if (hasMedicineHeader && validDataRows.length === 0) {
+            if (jsonRows.length) return buildStrictMedicationTableFromRows(jsonRows, true);
+            const localRows = extractMedicationCandidates().map(r => ({
+              medicine: r.medicine,
+              instructions: r.instruction,
+              confidence: r.confidence,
+              needsVerification: r.confidence !== 'Medium'
+            }));
+            return buildStrictMedicationTableFromRows(localRows, false);
+          }
+
+          if (!text || (/^-{5,}/m.test(text) && !validDataRows.length)) {
+            if (jsonRows.length) return buildStrictMedicationTableFromRows(jsonRows, true);
+          }
+          return text;
+        };
+
+
+        const isMalformedOrEmptyTableOutput = (rawText) => {
+          const text = stripModelSourceDump(String(rawText || '')).trim();
+          if (!text) return true;
+          const lines = text.split(/\n/).map(x => x.trim()).filter(Boolean);
+          const pipeLines = lines.filter(line => line.includes('|'));
+          if (!pipeLines.length) return false;
+
+          const hasLikelyHeader = pipeLines.some(line => /medicine|instruction|side effects|warning|what to track|how often|why it matters/i.test(line));
+          if (!hasLikelyHeader) return false;
+
+          const dataRows = pipeLines.filter(line => {
+            const lower = line.toLowerCase();
+            if (/medicine|instruction|side effects|warning|what to track|how often|why it matters|patient-safe note/.test(lower)) return false;
+            if (/^\|?\s*:?-{2,}:?[-\s|:]*$/.test(line)) return false;
+            const cells = splitMarkdownTableRow(line).map(c => c.trim()).filter(Boolean);
+            return cells.length >= 2 && cells.some(c => !/^:?-{2,}:?$/.test(c));
+          });
+
+          // If the model produced pipe headers/separators but no real data rows, treat it as broken.
+          return hasLikelyHeader && dataRows.length === 0;
+        };
+
+        const decodePlainInstruction = (instruction) => {
+          const original = String(instruction || '').trim();
+          if (!original) return 'Not clearly stated in the uploaded documents';
+          let out = original;
+          const replacements = [
+            [/\bPO\b/ig, 'by mouth'],
+            [/\bQD\b|\bOD\b/ig, 'once daily'],
+            [/\bBID\b/ig, 'twice daily'],
+            [/\bTID\b/ig, 'three times daily'],
+            [/\bQID\b/ig, 'four times daily'],
+            [/\bHS\b|\bQHS\b/ig, 'at bedtime'],
+            [/\bPC\b/ig, 'after meals'],
+            [/\bAC\b/ig, 'before meals'],
+            [/\bPRN\b|\bSOS\b/ig, 'as needed']
+          ];
+          replacements.forEach(([pattern, value]) => { out = out.replace(pattern, value); });
+          return out.replace(/\s+/g, ' ').trim();
+        };
+
+        const getMedicationRowsForFallback = (understanding) => {
+          const jsonRows = parseMedicationJsonFromCaseMemory(understanding);
+          if (jsonRows.length) return jsonRows;
+          return extractMedicationCandidates().map(r => ({
+            medicine: r.medicine || 'Unclear medicine name',
+            instructions: r.instruction || '',
+            confidence: r.confidence || 'low',
+            needsVerification: r.confidence !== 'Medium'
+          }));
+        };
+
+        const buildInstructionFallbackTable = (understanding) => {
+          const rows = getMedicationRowsForFallback(understanding);
+          if (!rows.length) return 'No clearly readable medicine instructions were extracted. Please upload a clearer prescription image/PDF or use Gemini Vision/OCR, and verify the medicine schedule with a pharmacist.';
+          const header = 'Medicine | Original instruction | Plain-English instruction | Needs verification?\n|---|---|---|---|';
+          const body = rows.map(row => {
+            const med = sanitizeTableCell(row.medicine || 'Unclear medicine name');
+            const original = sanitizeTableCell(row.instructions || 'Not clearly stated in documents');
+            const plain = sanitizeTableCell(decodePlainInstruction(row.instructions));
+            const verify = row.needsVerification || /unclear|low/i.test(`${row.medicine} ${row.confidence}`) ? 'Yes — confirm with doctor/pharmacist' : 'Confirm if dose/duration is missing';
+            return `${med} | ${original} | ${plain} | ${sanitizeTableCell(verify)}`;
+          }).join('\n');
+          return `${header}\n${body}`;
+        };
+
+        const buildSideEffectsFallbackTable = (understanding) => {
+          const rows = getMedicationRowsForFallback(understanding);
+          if (!rows.length) return 'No clearly readable medicines were extracted, so side effects cannot be safely listed. Please verify the prescription first.';
+          const header = 'Medicine | Common side effects | Serious warning signs | Patient-safe note\n|---|---|---|---|';
+          const body = rows.map(row => {
+            const med = sanitizeTableCell(row.medicine || 'Unclear medicine name');
+            const isUnclear = /unclear/i.test(med) || /low/i.test(row.confidence || '');
+            if (isUnclear) {
+              return `${med} | Not safe to infer | Allergy reaction, severe dizziness, breathing difficulty, swelling, chest pain | Verify medicine name before using or checking side effects`;
+            }
+            return `${med} | Needs trusted drug reference check | Severe allergic reaction, breathing difficulty, face/lip swelling, fainting, chest pain, severe rash | This fallback could not safely auto-fill drug-specific effects. Re-run with internet enrichment or verify with pharmacist.`;
+          }).join('\n');
+          return `${header}\n${body}`;
+        };
+
+        const buildTrackingFallbackTable = (understanding) => {
+          const local = understanding?.local || buildLocalCaseUnderstanding();
+          const combined = JSON.stringify(local).toLowerCase();
+          const rows = [];
+          if (/hypertension|blood pressure|\bbp\b/.test(combined)) rows.push(['Blood pressure', 'As advised by clinician; commonly daily if home BP monitoring was requested', 'Shows whether blood pressure treatment is working']);
+          if (/diabetes|glucose|hba1c|sugar/.test(combined)) rows.push(['Blood sugar', 'As advised by clinician', 'Helps track glucose control']);
+          if (/fever|infection|temperature/.test(combined)) rows.push(['Temperature', 'When feeling feverish or as advised', 'Helps detect worsening infection']);
+          if (getMedicationRowsForFallback(understanding).length) rows.push(['Medicine doses and missed doses', 'Every dose', 'Helps avoid accidental missed or duplicate doses']);
+          rows.push(['New or worsening symptoms', 'Whenever they happen', 'Useful for follow-up and urgent warning review']);
+          rows.push(['Side effects after medicines', 'Whenever noticed', 'Helps doctor/pharmacist decide if medicine needs review']);
+          rows.push(['Follow-up date / repeat tests', 'Once scheduled', 'Prevents missed review appointments']);
+          const header = 'What to track | How often | Why it matters\n|---|---|---|';
+          const body = rows.slice(0, 7).map(r => r.map(sanitizeTableCell).join(' | ')).join('\n');
+          return `${header}\n${body}`;
+        };
+
+        const getRenderableRoadmapContent = (rawText, goal, understanding) => {
+          const text = stripModelSourceDump(String(rawText || '')).trim();
+          if (/medicines am I taking/i.test(goal.title)) return getRenderableMedicationContent(text, understanding);
+          if (!isMalformedOrEmptyTableOutput(text)) return text;
+          if (/medicine instructions/i.test(goal.title)) return buildInstructionFallbackTable(understanding);
+          if (/side effects/i.test(goal.title)) return buildSideEffectsFallbackTable(understanding);
+          if (/track/i.test(goal.title)) return buildTrackingFallbackTable(understanding);
+          return 'The model returned an empty table for this section. Clear cache and try again, or upload clearer documents. No unsafe guess was shown.';
+        };
+
         const KNOWN_MEDICINES = [
           'amlodipine','metformin','atorvastatin','rosuvastatin','paracetamol','acetaminophen','ibuprofen','aspirin','insulin','omeprazole','pantoprazole','azithromycin','amoxicillin','augmentin','cetirizine','levocetirizine','loratadine','montelukast','salbutamol','levothyroxine','losartan','valsartan','bisoprolol','metoprolol','furosemide','spironolactone','clopidogrel','warfarin','rivaroxaban','apixaban','esomeprazole','domperidone','ondansetron','doxycycline','ciprofloxacin','levofloxacin','cefuroxime','ceftriaxone','prednisolone','dexamethasone','hydrocortisone','diclofenac','naproxen','tramadol','pregabalin','gabapentin','vitamin d','vitamin d3','calcium','iron','folic acid'
         ];
@@ -1763,8 +2007,9 @@ Absolute output rules:
           let sectionRules = '';
           if (/medicines am I taking/i.test(goal.title)) {
             sectionRules = `Medication section only.
-Return exactly ONE clean markdown table with these columns:
+Return exactly ONE clean markdown table with these columns and this exact separator line:
 Medicine | Purpose | Instructions | Side Effects | Warnings
+|---|---|---|---|---|
 Rules:
 - First use the 4B) MEDICATIONS_JSON section from the case memory if present. Render one table row for each JSON object only.
 - Extract the full medicine name exactly as written in the document. Do not shorten it.
@@ -1776,7 +2021,8 @@ Rules:
 - Instructions must come from the uploaded documents only; if missing, write "Not clearly stated in documents".
 - Side Effects should include 2-4 common side effects from trusted general knowledge for each clearly identified medicine.
 - Warnings should include document warnings plus the most important common warnings/interactions only.
-- Do not include diagnosis explanation, lab explanations, diet advice, or whole-document text. Keep only the table.`;
+- Do not include diagnosis explanation, lab explanations, diet advice, or whole-document text. Keep only the table.
+- Never output separator-only dashed lines as rows. If no medicines are found, write one sentence: "No clearly readable medicine was extracted.`;
           } else if (/side effects/i.test(goal.title)) {
             sectionRules = `Side effects/warnings section only.
 Use clearly extracted medicines only. Use the exact full medicine name from the document; do not shorten or guess; do not merge medicines. Return a compact table:
@@ -1868,7 +2114,7 @@ Internet enrichment enabled: ${useRoadmapInternet ? 'YES' : 'NO'}\n${sectionRule
           setMiddleView('roadmap');
 
           if (isSampleCase || enhancedGoalContent[goal.id]) return;
-          const resultCacheKey = `az-medstudio-cache:v2-meds:goal:${getDocsFingerprint()}:${goal.id}:web-${useRoadmapInternet ? 'on' : 'off'}:lang-${middleViewLang}`;
+          const resultCacheKey = `az-medstudio-cache:v3-table-fallback:goal:${getDocsFingerprint()}:${goal.id}:web-${useRoadmapInternet ? 'on' : 'off'}:lang-${middleViewLang}`;
           const cachedGoal = cacheGet(resultCacheKey);
           if (cachedGoal) {
             setEnhancedGoalContent(prev => ({ ...prev, [goal.id]: cachedGoal }));
@@ -1903,8 +2149,9 @@ Internet enrichment enabled: ${useRoadmapInternet ? 'YES' : 'NO'}\n${sectionRule
             const result = await fetchGeminiWithDocuments(goal, understanding);
             const rawText = result?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('\n').trim() || 'No section analysis was generated.';
             const groundingChunks = result?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+            const isMedicineGoal = /medicines am I taking/i.test(goal.title);
             const finalGoalPayload = {
-              content: stripModelSourceDump(rawText),
+              content: getRenderableRoadmapContent(rawText, goal, understanding),
               evidence: `Sources checked: ${docs.map(d => d.name).join(', ')}${formatCleanGroundingSources(groundingChunks)}`
             };
             cacheSet(resultCacheKey, finalGoalPayload);
